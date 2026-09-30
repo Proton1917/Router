@@ -25,8 +25,13 @@ trap 'exit 129' HUP
 
 "$client_program" "${provider_args[@]}" debug models > "$catalog_source"
 
-# 从模型配置补充客户端服务等级，保留后端目录中的其他模型元数据。
-jq --slurpfile routing "$routing_config" '
+# 合并启动方式的默认服务等级、后端目录元数据和单个模型的配置。
+jq --slurpfile routing "$routing_config" --argjson defaults "${ROUTER_CODEX_DEFAULT_SERVICE_TIERS:-[]}" --arg pattern "${ROUTER_CODEX_CATALOG_MODEL_PATTERN:-}" '
+  if ($defaults | type) != "array" or any($defaults[]; (.id | type) != "string" or (.name | type) != "string")
+  then error("默认服务等级必须为包含 id 和 name 的对象数组") else . end
+  | if $pattern != "" and (any(.models[]; .slug | test($pattern)) | not)
+    then error("后端模型目录没有符合入口配置的模型") else . end
+  |
   $routing[0] as $config
   | .models |= map(
       . as $model
@@ -34,11 +39,11 @@ jq --slurpfile routing "$routing_config" '
          | select(.standard.model == $model.slug and .fast.model == $model.slug and .standard.target == .fast.target)
          | .fast.field_policy.set["/service_tier"] // empty] | unique as $tiers
       | $model
-      | .service_tiers = ((.service_tiers // []) + [$tiers[] as $tier | {
+      | .service_tiers = ($defaults + (.service_tiers // []) + [$tiers[] as $tier | {
           id: $tier,
-          name: ($config.management.labels["service-tier:" + $tier] // $tier),
-          description: ($config.management.labels["service-tier-description:" + $tier] // $tier)
-        }] | unique_by(.id))
+          name: ($config.management.labels["service-tier:" + $tier] // ([$defaults[] | select(.id == $tier) | .name][0]) // $tier),
+          description: ($config.management.labels["service-tier-description:" + $tier] // ([$defaults[] | select(.id == $tier) | .description][0]) // $tier)
+        }] | group_by(.id) | map(last))
     )
 ' "$catalog_source" > "$catalog_file"
 

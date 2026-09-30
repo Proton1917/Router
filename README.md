@@ -40,7 +40,9 @@ router config check
 
 新增命令在网页中填写名称、选择启动方式和模型后，应用修改会自动同步终端入口。模型的标准与 Fast 目标可通过“服务等级”选择上游标准、Priority 或 Flex 服务。启动方式的 `options` 可以声明选项名称、默认值和各选项对应的参数数组，网页自动生成下拉框；每个命令在自身 `options` 中保存所选值。例如 Codex 的启动服务等级通过该机制生成 `-c service_tier="fast"` 参数，运行时发送 `service_tier: "priority"`。
 
-`scripts/codex-api.zsh` 从后端读取 Codex 模型目录，并将同模型、同后端 Fast 目标中的服务等级补充到客户端目录，使启动服务等级配置能够生效。该脚本依赖 Zsh 与 jq，参数依次为 router 配置文件、临时目录、Codex 程序、provider 参数、`--` 和客户端参数。临时目录应位于仓库外；生成的目录文件在客户端退出时删除。API 客户端的会话内快捷命令由客户端自身决定。
+`scripts/codex-api.zsh` 从后端读取 Codex 模型目录，并合并启动方式的默认服务等级、后端目录元数据和同模型、同后端 Fast 目标中的服务等级。启动方式的环境变量 `ROUTER_CODEX_DEFAULT_SERVICE_TIERS` 接受包含 `id`、`name`、`description` 的 JSON 对象数组；OpenRouter 入口可将 `priority` 声明为所有目录模型的默认 Fast 服务等级。该规则也适用于后续新增的目录模型。该脚本依赖 Zsh 与 jq，参数依次为 router 配置文件、临时目录、Codex 程序、provider 参数、`--` 和客户端参数。临时目录应位于仓库外；生成的目录文件在客户端退出时删除。API 客户端的会话内快捷命令由客户端自身决定。
+
+`ROUTER_CODEX_CATALOG_MODEL_PATTERN` 可声明后端模型名称需要匹配的正则表达式。OpenRouter 入口可使用 `/` 检查带命名空间的模型 ID；目录不符合要求时启动立即失败。Fast 表示请求上游 `priority` 服务等级，实际使用的服务等级以 OpenRouter 响应为准。
 
 修改先进入浏览器草稿，应用前校验配置结构、引用关系和路由用例，并展示受影响的用例。保存使用文件锁、版本摘要和原子替换，过期版本会被拒绝。命令绑定生成带有独立请求头的路由；启动模型名称可以按协议配置在 `management.profile_models` 中，后端协议声明由 `management.backend_protocols` 保存。
 
