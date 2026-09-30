@@ -1,0 +1,71 @@
+{
+  "schema_version": 2,
+  "runtime": {
+    "server": {
+      "listen": "127.0.0.1:8080",
+      "health_path": "/health",
+      "max_request_bytes": 67108864,
+      "connect_timeout_ms": 10000,
+      "request_timeout_ms": 600000,
+      "dry_run_header": "x-router-dry-run",
+      "dry_run_values": ["1", "true"],
+      "endpoints": {
+        "/v1/messages": "messages",
+        "/v1/responses": "responses",
+        "/v1/responses/compact": "responses",
+        "/v1/responses/*": "responses",
+        "/v1/chat/completions": "chat_completions",
+        "/v1/models": "models"
+      }
+    },
+    "backends": {
+      "messages": {
+        "base_url": "https://api.anthropic.com",
+        "auth": {
+          "token_env": "MESSAGES_API_KEY",
+          "headers": {"x-api-key": "{token}"}
+        }
+      },
+      "responses": {
+        "base_url": "https://api.openai.com",
+        "auth": {
+          "token_env": "RESPONSES_API_KEY",
+          "headers": {"authorization": "Bearer {token}"}
+        }
+      }
+    },
+    "clients": [
+      {"id": "responses-client", "paths": ["/v1/responses", "/v1/responses/*"]},
+      {"id": "messages-client"}
+    ],
+    "selection": {
+      "model_pointer": "/model",
+      "speed_pointer": "/speed",
+      "fast_value": "fast",
+      "ignored_model_suffixes": []
+    },
+    "reasoning_policies": {},
+    "strip_request_headers": ["x-router-dry-run", "authorization", "x-api-key"],
+    "cors": {
+      "allow_origin": "http://localhost",
+      "reflect_request_origin": false,
+      "allow_methods": "GET,POST,HEAD,OPTIONS",
+      "allow_headers": "content-type,authorization,x-api-key,anthropic-version",
+      "expose_headers": "request-id",
+      "allow_private_network": true,
+      "max_age_seconds": 3600
+    }
+  },
+  "profiles": {
+    "messages": {"standard": {"target": "messages"}},
+    "responses": {"standard": {"target": "responses"}}
+  },
+  "routes": [
+    {"id": "responses", "match": {"contexts": ["responses-client"]}, "profile": "responses"},
+    {"id": "messages", "match": {}, "profile": "messages"}
+  ],
+  "validation_cases": [
+    {"name": "responses-model-passthrough", "context": "responses-client", "model": "selected-model", "expected": {"rule_id": "responses", "target": "responses", "model": "selected-model"}},
+    {"name": "messages-model-passthrough", "context": "messages-client", "model": "selected-model", "expected": {"rule_id": "messages", "target": "messages", "model": "selected-model"}}
+  ]
+}

@@ -1,0 +1,4 @@
+/target/
+/.work/
+*.bak*
+.DS_Store
