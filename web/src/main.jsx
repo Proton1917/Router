@@ -56,7 +56,9 @@ function Modal({ title, eyebrow, children, close, footer, wide }) {
 function JsonField({ label, value, onChange, onError, hint, rows = 6 }) {
   const [text, setText] = useState(pretty(value));
   const [error, setError] = useState('');
-  function edit(text) { setText(text); try { const value = JSON.parse(text); onChange(value); setError(''); onError?.(false); } catch (e) { setError(e.message); onError?.(true); } }
+  const lastValue = React.useRef(pretty(value));
+  useEffect(() => { const current = pretty(value); if (current !== lastValue.current) { lastValue.current = current; setText(current); setError(''); onError?.(false); } }, [value, onError]);
+  function edit(text) { setText(text); try { const value = JSON.parse(text); lastValue.current = pretty(value); onChange(value); setError(''); onError?.(false); } catch (e) { setError(e.message); onError?.(true); } }
   return <Field label={label} hint={hint} wide><textarea className="code-input" rows={rows} value={text} onChange={e => edit(e.target.value)}/>{error && <span className="inline-error">JSON 格式尚未完成</span>}</Field>;
 }
 
