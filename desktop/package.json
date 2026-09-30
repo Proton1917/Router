@@ -7,7 +7,7 @@
   "scripts": {
     "prepare:bundle": "node prepare.mjs",
     "dev": "tauri dev",
-    "build": "tauri build --bundles app,dmg"
+    "build": "node build.mjs"
   },
   "devDependencies": {"@tauri-apps/cli": "2.12.0"}
 }

@@ -1,0 +1,11 @@
+{
+  "LICENSE": "LICENSE",
+  "desktop/appearance.json": "appearance.json",
+  "desktop/THIRD_PARTY_NOTICES.txt": "THIRD_PARTY_NOTICES.txt",
+  "router-rs/target/release/router": "router",
+  "router-rs/examples/router.json": "examples/router.json",
+  "router-rs/examples/management.json": "examples/management.json",
+  "scripts/client-integrations.py": "scripts/client-integrations.py",
+  "scripts/codex-api.zsh": "scripts/codex-api.zsh",
+  "scripts/macos-service.zsh": "scripts/macos-service.zsh"
+}

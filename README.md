@@ -8,7 +8,7 @@
 
 桌面版使用 Tauri 2 和 macOS 自带的 WebKit。当前提供 macOS 14 及以上版本的安装流程，已验证 Apple Silicon。应用包含 router 程序、网页和首次安装所需的配置示例，使用安装包时无需安装 Rust 或 Node.js。
 
-取得源码后，可按下文“从源码构建桌面安装包”生成安装镜像，再执行以下安装步骤。
+在 [Releases](https://github.com/Proton1917/Router/releases) 下载 `Router_0.2.0_aarch64.dmg` 和 `SHA256SUMS.txt`。将两个文件放在同一目录，执行 `shasum -a 256 -c SHA256SUMS.txt` 校验完整性，再执行以下安装步骤。也可以按下文“从源码构建桌面安装包”自行构建。
 
 1. 打开 `Router_0.2.0_aarch64.dmg`，将 **Router.app** 拖入“应用程序”。
 2. 打开 Router。首次使用可以选择“创建新配置”，也可以通过“选择已有配置文件”接入已有 `router.json`。已有配置需包含 `management`，网页资源路径需存在。
@@ -23,7 +23,7 @@
 
 桌面窗口在 macOS 26+ 使用原生 Liquid Glass，macOS 27+ 同时启用其交互效果；macOS 14–15 使用系统侧栏材质。标题栏与侧栏显示系统玻璃材质，编辑面板和操作栏使用透明层次，正文保持阅读对比度。窗口尺寸和材质定义位于 `desktop/appearance.json`；首次创建配置会将其复制为配置目录中的 `desktop.json`，修改后重新打开控制台生效。已有配置可放置同名文件来自定义外观。
 
-本地构建的 macOS 安装包使用 ad-hoc 签名。对外分发前需使用自己的 Apple Developer ID 签名并完成公证，以满足下载后首次运行的 Gatekeeper 检查。
+当前 macOS 安装包使用 ad-hoc 签名，尚未经过 Apple 公证。首次打开可能受到 Gatekeeper 阻止。确认下载来源和校验值后，可按 [Apple 官方说明](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac)，在“系统设置 → 隐私与安全性”中手动允许打开。
 
 ## 第一次配置 API 与命令
 
@@ -52,6 +52,19 @@ npm run build --prefix desktop
 构建过程会编译 router、构建网页、生成应用图标并打包。应用位于 `desktop/src-tauri/target/release/bundle/macos/Router.app`，安装镜像位于 `desktop/src-tauri/target/release/bundle/dmg/`。构建依赖仅用于开发，安装后的运行程序不依赖 Node.js。
 
 开发时运行 `npm run dev --prefix desktop`。先执行 `npm run prepare:bundle --prefix desktop` 可以准备直接运行 Cargo 检查所需的资源。
+
+发行构建会将源码、Cargo 依赖及 Rust 工具链路径映射为通用路径。`desktop/resources.json` 明确列出安装包资源。安装包包含项目许可证和 `THIRD_PARTY_NOTICES.txt`；构建前会核对许可声明对应的依赖锁文件。
+
+修改依赖锁文件后，使用 cargo-about 更新许可声明：
+
+```sh
+cargo install --locked --features cli cargo-about
+mkdir -p .work/licenses
+cargo about generate --locked --fail --format json --config desktop/about.toml --manifest-path router-rs/Cargo.toml --output-file .work/licenses/router.json
+cargo about generate --locked --fail --format json --config desktop/about.toml --manifest-path desktop/src-tauri/Cargo.toml --output-file .work/licenses/desktop.json
+npm ci --prefix web
+node desktop/notices.mjs .work/licenses/router.json .work/licenses/desktop.json
+```
 
 ## 安装命令行与网页
 
@@ -158,6 +171,7 @@ npm run build --prefix web
 | --- | --- |
 | 路由、命令及管理配置 | `router.json` |
 | 原生服务与网页 | `application/bin/router`、`application/web/` |
+| 项目与第三方许可声明 | `application/LICENSE`、`application/THIRD_PARTY_NOTICES.txt` |
 | API 凭据 | `credentials/`，文件权限为 `0600` |
 | 管理令牌 | `control-token` |
 | Zsh 命令与初始化文件 | `commands.zsh`、`commands.init.zsh` |

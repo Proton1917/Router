@@ -326,6 +326,9 @@ fn initialize(
     fs::copy(source.join("router"), installation.join("bin/router"))?;
     copy_directory(&source.join("web"), &installation.join("web"))?;
     copy_directory(&source.join("scripts"), &installation.join("scripts"))?;
+    for name in ["LICENSE", "THIRD_PARTY_NOTICES.txt"] {
+        fs::copy(source.join(name), installation.join(name))?;
+    }
     fs::copy(
         source.join("appearance.json"),
         directory.join("desktop.json"),
