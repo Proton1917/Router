@@ -8,6 +8,15 @@
 
 桌面版使用 Tauri 2 和 macOS 自带的 WebKit。当前提供 macOS 14 及以上版本的安装流程，已验证 Apple Silicon。应用包含 router 程序、网页和首次安装所需的配置示例，使用安装包时无需安装 Rust 或 Node.js。
 
+使用 Homebrew 安装：
+
+```sh
+brew install --cask Proton1917/tap/router
+open -a Router
+```
+
+Homebrew 会自动添加项目的 Tap。升级桌面应用使用 `brew upgrade --cask Proton1917/tap/router`，卸载使用 `brew uninstall --cask Proton1917/tap/router`。已部署的后台程序、网页资源、配置和凭据保存在所选配置目录中，关闭或卸载桌面应用后会保留；后台程序和网页资源的升级步骤见下文“升级与文件位置”。
+
 在 [Releases](https://github.com/Proton1917/Router/releases) 下载 `Router_0.2.0_aarch64.dmg` 和 `SHA256SUMS.txt`。将两个文件放在同一目录，执行 `shasum -a 256 -c SHA256SUMS.txt` 校验完整性，再执行以下安装步骤。也可以按下文“从源码构建桌面安装包”自行构建。
 
 1. 打开 `Router_0.2.0_aarch64.dmg`，将 **Router.app** 拖入“应用程序”。
