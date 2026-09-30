@@ -502,12 +502,12 @@ fn launch_spec(path: &Path, name: &str, extra: &[String]) -> Result<LaunchSpec> 
     if let Some((variable, model)) = deferred_model {
         environment.insert(variable, model);
     }
+    environment.insert("ROUTER_COMMAND_NAME".to_owned(), name.to_owned());
     if template.deferred {
         environment.insert(
             "ROUTER_EXECUTABLE".to_owned(),
             std::env::current_exe()?.to_string_lossy().into_owned(),
         );
-        environment.insert("ROUTER_COMMAND_NAME".to_owned(), name.to_owned());
         environment.insert(
             "ROUTER_CONFIG".to_owned(),
             path.to_string_lossy().into_owned(),

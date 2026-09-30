@@ -7,5 +7,6 @@
   "router-rs/examples/management.json": "examples/management.json",
   "scripts/client-integrations.py": "scripts/client-integrations.py",
   "scripts/codex-api.zsh": "scripts/codex-api.zsh",
+  "scripts/codex-catalog.jq": "scripts/codex-catalog.jq",
   "scripts/macos-service.zsh": "scripts/macos-service.zsh"
 }

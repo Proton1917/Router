@@ -47,6 +47,8 @@ pub struct AuthConfig {
     pub token_file: Option<String>,
     #[serde(default)]
     pub token_command: Vec<String>,
+    #[serde(default)]
+    pub error_hint: Option<String>,
     pub headers: HashMap<String, String>,
 }
 

@@ -17,9 +17,9 @@ open -a Router
 
 Homebrew 会自动添加项目的 Tap。升级桌面应用使用 `brew upgrade --cask Proton1917/tap/router`，卸载使用 `brew uninstall --cask Proton1917/tap/router`。已部署的后台程序、网页资源、配置和凭据保存在所选配置目录中，关闭或卸载桌面应用后会保留；后台程序和网页资源的升级步骤见下文“升级与文件位置”。
 
-在 [Releases](https://github.com/Proton1917/Router/releases) 下载 `Router_0.2.0_aarch64.dmg` 和 `SHA256SUMS.txt`。将两个文件放在同一目录，执行 `shasum -a 256 -c SHA256SUMS.txt` 校验完整性，再执行以下安装步骤。也可以按下文“从源码构建桌面安装包”自行构建。
+在 [Releases](https://github.com/Proton1917/Router/releases) 下载 `Router_0.2.1_aarch64.dmg` 和 `SHA256SUMS.txt`。将两个文件放在同一目录，执行 `shasum -a 256 -c SHA256SUMS.txt` 校验完整性，再执行以下安装步骤。也可以按下文“从源码构建桌面安装包”自行构建。
 
-1. 打开 `Router_0.2.0_aarch64.dmg`，将 **Router.app** 拖入“应用程序”。
+1. 打开 `Router_0.2.1_aarch64.dmg`，将 **Router.app** 拖入“应用程序”。
 2. 打开 Router。首次使用可以选择“创建新配置”，也可以通过“选择已有配置文件”接入已有 `router.json`。已有配置需包含 `management`，网页资源路径需存在。
 3. 创建配置时确认配置目录、终端入口目录和两个监听地址，点击“安装并打开控制台”。默认分别为 `~/.config/router`、`~/.local/bin`、`127.0.0.1:8080` 和 `127.0.0.1:8081`。已有文件或端口冲突会显示具体错误。
 4. 保持“自动配置 Zsh 终端入口”选中，会在 `~/.zshrc` 添加初始化语句并备份原文件。重新打开终端后，`router` 及以后在界面新增的命令即可使用。
@@ -153,7 +153,9 @@ router config check
 
 `scripts/codex-api.zsh` 从后端读取 Codex 模型目录，并合并启动方式的默认服务等级、后端目录元数据和同模型、同后端 Fast 目标中的服务等级。启动方式的环境变量 `ROUTER_CODEX_DEFAULT_SERVICE_TIERS` 接受包含 `id`、`name`、`description` 的 JSON 对象数组；OpenRouter 入口可将 `priority` 声明为所有目录模型的默认 Fast 服务等级。该规则也适用于后续新增的目录模型。该脚本依赖 Zsh 与 jq，参数依次为 router 配置文件、临时目录、Codex 程序、provider 参数、`--` 和客户端参数。临时目录应位于仓库外；生成的目录文件在客户端退出时删除。API 客户端的会话内快捷命令由客户端自身决定。
 
-`ROUTER_CODEX_CATALOG_MODEL_PATTERN` 可声明后端模型名称需要匹配的正则表达式。OpenRouter 入口可使用 `/` 检查带命名空间的模型 ID；目录不符合要求时启动立即失败。Fast 表示请求上游 `priority` 服务等级，实际使用的服务等级以 OpenRouter 响应为准。
+`router run` 向启动程序提供 `ROUTER_COMMAND_NAME`。Codex 目录只保留该命令绑定的模型，以及带该命令标记的专属路由所引用的模型；名单来自配置，保留上游返回的能力信息。直接调用适配脚本时需设置同名环境变量。修改命令绑定或专属路由后，重新启动客户端即可读取新的模型列表。
+
+`ROUTER_CODEX_CATALOG_MODEL_PATTERN` 可声明后端模型名称需要匹配的正则表达式。OpenRouter 入口可使用 `/` 检查带命名空间的模型 ID；目录不符合要求或缺少已配置模型时启动立即失败。Fast 表示请求上游 `priority` 服务等级，实际使用的服务等级以 OpenRouter 响应为准。
 
 修改先进入浏览器草稿，应用前校验配置结构、引用关系和路由用例，并展示受影响的用例。保存使用文件锁、版本摘要和原子替换，过期版本会被拒绝。命令绑定生成带有独立请求头的路由；启动模型名称可以按协议配置在 `management.profile_models` 中，后端协议声明由 `management.backend_protocols` 保存。
 
@@ -175,6 +177,8 @@ npm run build --prefix web
 ## 升级与文件位置
 
 替换 Router.app 会更新桌面程序和其随附资源；已有配置仍指向原来部署的服务程序及网页。需要升级转发服务时，先用 `router status` 确认配置路径，将新包中 `Router.app/Contents/Resources/resources/router` 和 `web/` 分别复制至该配置实际使用的原生程序路径与 `management.assets_directory`，然后执行 `router web --restart`。配置文件、凭据和自定义脚本应保留。安装了新协议适配能力时，服务程序与配套网页应一起升级。
+
+使用 `codex-api.zsh` 的启动方式还需更新该脚本，并将同一安装包中的 `scripts/codex-catalog.jq` 放在它的同一目录。脚本位置以启动方式的 `args` 为准；更新后重新启动 Codex，以加载当前命令的模型目录。
 
 | 内容 | 桌面首次安装位置（相对于所选配置目录） |
 | --- | --- |
@@ -225,6 +229,8 @@ Rust 实现配置校验、规则执行、HTTP 传输和协议编解码。增加�
 `runtime.server.endpoints` 将路径绑定到 `messages`、`responses`、`chat_completions`、`models` 或 `passthrough`。路径支持末尾 `*`，精确匹配优先，其次选择最长前缀；客户端的 `paths` 使用同一规则。Responses 的创建、压缩、读取和删除等路径可以分别配置。`passthrough` 保留原始请求体字节。`runtime.backends.<id>.path_rewrites` 将入站路径映射到上游路径，并保留查询参数。
 
 配置文件中的凭据文件、凭据命令和客户端设置文件允许绝对路径或相对于配置文件所在目录的路径。凭据支持 `token_env`、`token_file`、`token_command` 三种来源，每个后端选择其中一种。凭据值应存放在仓库外。
+
+后端的 `auth.error_hint` 可填写凭据读取失败时的处理说明，例如重新登录所用的命令。该说明会随错误返回客户端，因此只应包含可公开的操作指引。凭据程序的标准错误输出不会传给客户端。
 
 供应商参数由 `runtime.backends.<id>.provider_fields` 声明。例如某个后端要求 `provider.only` 时，可配置：
 

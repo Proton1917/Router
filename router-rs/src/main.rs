@@ -442,6 +442,18 @@ async fn apply_backend_auth(
     mut builder: reqwest::RequestBuilder,
     auth: &AuthConfig,
 ) -> Result<reqwest::RequestBuilder> {
+    let result = read_backend_token(auth).await;
+    let token = match &auth.error_hint {
+        Some(hint) => result.with_context(|| hint.clone())?,
+        None => result?,
+    };
+    for (name, template) in &auth.headers {
+        builder = builder.header(name, template.replace("{token}", token.trim()));
+    }
+    Ok(builder)
+}
+
+async fn read_backend_token(auth: &AuthConfig) -> Result<String> {
     let token = if let Some(name) = &auth.token_env {
         env::var(name)
             .with_context(|| format!("credential environment variable {name} is not set"))?
@@ -458,14 +470,10 @@ async fn apply_backend_auth(
         }
         String::from_utf8(output.stdout).context("credential helper returned non-UTF-8 output")?
     };
-    let token = token.trim();
-    if token.is_empty() {
+    if token.trim().is_empty() {
         bail!("configured credential is empty");
     }
-    for (name, template) in &auth.headers {
-        builder = builder.header(name, template.replace("{token}", token));
-    }
-    Ok(builder)
+    Ok(token)
 }
 
 fn transparent_route(
