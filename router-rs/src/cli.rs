@@ -563,6 +563,16 @@ fn launch_spec(path: &Path, name: &str, extra: &[String]) -> Result<LaunchSpec> 
         .iter()
         .map(|arg| control::render(arg, &context))
         .collect::<Result<Vec<_>>>()?;
+    for (id, option) in &template.options {
+        let selected = entry.options.get(id).unwrap_or(&option.default);
+        args.extend(
+            option.choices[selected]
+                .args
+                .iter()
+                .map(|arg| control::render(arg, &context))
+                .collect::<Result<Vec<_>>>()?,
+        );
+    }
     args.extend(
         entry
             .args

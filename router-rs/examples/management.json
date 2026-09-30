@@ -24,9 +24,19 @@
     },
     "responses-client": {
       "label": "Codex API",
+      "options": {
+        "service-tier": {
+          "label": "启动服务等级",
+          "default": "standard",
+          "choices": {
+            "standard": {"label": "标准", "args": ["-c", "service_tier=\"default\""]},
+            "fast": {"label": "Fast · 快速", "args": ["-c", "service_tier=\"fast\""]}
+          }
+        }
+      },
       "description": "通过网关调用原生 Responses 后端。",
       "program": "codex",
-      "args": ["-c", "model_provider=\"router\"", "-c", "model_providers.router.name=\"router\"", "-c", "model_providers.router.base_url=\"{{ gateway_url }}/v1\"", "-c", "model_providers.router.wire_api=\"responses\"", "-c", "model_providers.router.requires_openai_auth=false", "-c", "model_providers.router.supports_websockets=false", "-c", "model_providers.router.http_headers.\"{{ command_header }}\"=\"{{ command_name }}\""],
+      "args": ["-c", "model_provider=\"router\"", "-c", "model_providers.router.name=\"router\"", "-c", "model_providers.router.base_url=\"{{ gateway_url }}/v1\"", "-c", "model_providers.router.wire_api=\"responses\"", "-c", "model_providers.router.requires_openai_auth=false", "-c", "model_providers.router.supports_websockets=false", "-c", "model_providers.router.http_headers={\"{{ command_header }}\"=\"{{ command_name }}\"}"],
       "model_flags": ["--model", "-m"],
       "request_path": "/v1/responses",
       "route_before": "responses",

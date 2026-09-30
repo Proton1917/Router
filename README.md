@@ -38,6 +38,10 @@ router config check
 
 `router web` 确保转发服务运行，启动独立的管理 HTTP 服务并按照 `management.browser` 打开浏览器。示例使用 Safari。网页包括启动命令、API 后端、模型配置、路由规则、启动方式及服务设置。常用参数使用表单编辑，完整 JSON 编辑保留全部配置能力。
 
+新增命令在网页中填写名称、选择启动方式和模型后，应用修改会自动同步终端入口。模型的标准与 Fast 目标可通过“服务等级”选择上游标准、Priority 或 Flex 服务。启动方式的 `options` 可以声明选项名称、默认值和各选项对应的参数数组，网页自动生成下拉框；每个命令在自身 `options` 中保存所选值。例如 Codex 的启动服务等级通过该机制生成 `-c service_tier="fast"` 参数，运行时发送 `service_tier: "priority"`。
+
+`scripts/codex-api.zsh` 从后端读取 Codex 模型目录，并将同模型、同后端 Fast 目标中的服务等级补充到客户端目录，使启动服务等级配置能够生效。该脚本依赖 Zsh 与 jq，参数依次为 router 配置文件、临时目录、Codex 程序、provider 参数、`--` 和客户端参数。临时目录应位于仓库外；生成的目录文件在客户端退出时删除。API 客户端的会话内快捷命令由客户端自身决定。
+
 修改先进入浏览器草稿，应用前校验配置结构、引用关系和路由用例，并展示受影响的用例。保存使用文件锁、版本摘要和原子替换，过期版本会被拒绝。命令绑定生成带有独立请求头的路由；启动模型名称可以按协议配置在 `management.profile_models` 中，后端协议声明由 `management.backend_protocols` 保存。
 
 终端入口通过 `router commands install` 同步。`router` 主命令安装到 `launcher_directory`，客户端命令生成为 Zsh 函数，避免影响外部程序查找同名系统可执行文件。将返回的 `shell_init` 文件在 `.zshrc` 中加载一次，后续新增和重命名在终端提示符或命令执行前同步。已有终端首次接入时需要重新加载此初始化文件。

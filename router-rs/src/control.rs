@@ -41,6 +41,8 @@ pub struct LaunchTemplate {
     #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
+    pub options: BTreeMap<String, LaunchOption>,
+    #[serde(default)]
     pub env: BTreeMap<String, String>,
     #[serde(default)]
     pub unset_env: Vec<String>,
@@ -75,6 +77,21 @@ pub struct EnvGate {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
+pub struct LaunchOption {
+    pub label: String,
+    pub default: String,
+    pub choices: BTreeMap<String, LaunchChoice>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LaunchChoice {
+    pub label: String,
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct CommandSpec {
     pub template: String,
     #[serde(default)]
@@ -93,6 +110,8 @@ pub struct CommandSpec {
     pub program: Option<String>,
     #[serde(default)]
     pub args: Vec<String>,
+    #[serde(default)]
+    pub options: BTreeMap<String, String>,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
     #[serde(default)]
@@ -159,6 +178,16 @@ impl Management {
                 .templates
                 .get(&command.template)
                 .with_context(|| format!("命令 {name} 引用了不存在的启动模板"))?;
+            for (option, choice) in &command.options {
+                let setting = template
+                    .options
+                    .get(option)
+                    .with_context(|| format!("命令 {name} 的启动选项不存在: {option}"))?;
+                ensure!(
+                    setting.choices.contains_key(choice),
+                    "命令 {name} 的启动选项 {option} 不支持 {choice}"
+                );
+            }
             if command.profile.is_some() {
                 ensure!(
                     template.request_path.is_some(),
@@ -168,6 +197,16 @@ impl Management {
         }
         for (name, template) in &self.templates {
             validate_name(name)?;
+            for (id, option) in &template.options {
+                validate_name(id)?;
+                ensure!(
+                    !option.label.is_empty() && option.choices.contains_key(&option.default),
+                    "启动方式 {name} 的选项 {id} 缺少名称或有效默认值"
+                );
+                for choice in option.choices.keys() {
+                    validate_name(choice)?;
+                }
+            }
             ensure!(
                 !template.program.is_empty(),
                 "启动模板 {name} 的程序不能为空"
