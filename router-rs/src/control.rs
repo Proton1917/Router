@@ -151,6 +151,8 @@ pub struct Management {
     pub generated_routes: Vec<String>,
     #[serde(default)]
     pub generated_cases: Vec<String>,
+    #[serde(default)]
+    pub integrations: BTreeMap<String, crate::integrations::Integration>,
 }
 
 impl Management {
@@ -162,6 +164,10 @@ impl Management {
         ensure!(self.max_request_bytes > 0, "管理请求大小必须大于零");
         ensure!(self.listen.port() > 0, "管理界面需要明确的监听端口");
         self.command_header.parse::<http::HeaderName>()?;
+        for (id, integration) in &self.integrations {
+            validate_name(id)?;
+            integration.validate()?;
+        }
         ensure!(!self.browser.program.is_empty(), "浏览器启动程序不能为空");
         let mut names = BTreeSet::new();
         for (name, command) in &self.commands {
@@ -491,6 +497,7 @@ pub fn prepare_candidate(current: &Value, mut candidate: Value) -> Result<(Value
         candidate["validation_cases"].as_array_mut().expect("cases array").push(json!({"name": id, "context": client.id, "model": model, "headers": case_headers, "expected": {"rule_id": id, "target": target, "model": model}}));
         managed_ids.push(id);
     }
+    crate::integrations::materialize(&mut candidate, &mut managed_ids)?;
     candidate["management"]["generated_routes"] = json!(managed_ids);
     candidate["management"]["generated_cases"] = json!(managed_ids);
     let strip = candidate["runtime"]["strip_request_headers"]
@@ -764,6 +771,29 @@ async fn restart(State(state): State<ControlState>) -> Result<Json<Value>, ApiEr
     Ok(Json(json!({"restarted":true})))
 }
 
+#[derive(Deserialize)]
+struct IntegrationRequest {
+    id: String,
+    action: String,
+    revision: Option<String>,
+}
+
+async fn integration_action(
+    State(state): State<ControlState>,
+    Json(request): Json<IntegrationRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let _guard = state.lock.lock().await;
+    if request.action == "sync" {
+        let current = load_value(&state.path)?;
+        if request.revision.as_deref() != Some(&revision(&current)?) {
+            return Err(anyhow::anyhow!("配置已变更，请刷新后应用客户端接入").into());
+        }
+    }
+    Ok(Json(
+        crate::integrations::perform(&state.path, &request.id, &request.action).await?,
+    ))
+}
+
 async fn stop_control(State(state): State<ControlState>) -> Json<Value> {
     state.shutdown.notify_one();
     Json(json!({"stopping":true}))
@@ -865,6 +895,7 @@ pub async fn serve(path: PathBuf) -> Result<()> {
         .route("/commands/install", post(install))
         .route("/commands/preview", post(launch_preview))
         .route("/backends/probe", post(backend_probe))
+        .route("/integrations/action", post(integration_action))
         .route("/service/restart", post(restart))
         .route("/stop", post(stop_control))
         .route(

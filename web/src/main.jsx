@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
+import { IntegrationWorkspace, IntegrationEditor } from './integrations.jsx';
 
 const copy = value => structuredClone(value);
 const pretty = value => JSON.stringify(value, null, 2);
@@ -20,6 +21,7 @@ async function api(path, body) {
 const sections = [
   ['commands', '启动命令', '01'], ['backends', 'API 后端', '02'], ['models', '模型配置', '03'],
   ['routes', '路由规则', '04'], ['templates', '启动方式', '05'], ['settings', '服务设置', '06'],
+  ['integrations', '客户端接入', '07'],
 ];
 const descriptions = {
   commands: '为不同客户端和工作方式设置独立入口。名称、模型和启动参数由你决定。',
@@ -28,6 +30,7 @@ const descriptions = {
   routes: '按从上到下的顺序匹配请求。命令绑定的规则由相应命令配置管理。',
   templates: '启动程序、参数和环境变量的可复用配置。命令可以在此基础上单独调整。',
   settings: '管理转发服务的网络与资源配置。服务参数修改后需要重启。',
+  integrations: '选择客户端，配置它使用的 API 服务与模型，并同步接入设置。',
 };
 
 function Icon({ name = 'grid', size = 18 }) {
@@ -69,6 +72,7 @@ function App() {
   const [section, setSection] = useState('commands');
   const [query, setQuery] = useState('');
   const [editor, setEditor] = useState(null);
+  const [integrationEditor, setIntegrationEditor] = useState(null);
   const [preview, setPreview] = useState(null);
   const [details, setDetails] = useState(null);
   const [confirm, setConfirm] = useState(null);
@@ -83,10 +87,11 @@ function App() {
   useEffect(() => { if (!notice) return; const id = setTimeout(() => setNotice(null), 7000); return () => clearTimeout(id); }, [notice]);
   useEffect(() => { const id = setInterval(() => api('state').then(data => setStatus(data.status)).catch(error => setStatus(old => ({ ...old, control_error: error.message }))), 8000); return () => clearInterval(id); }, []);
 
-  async function task(action) { setBusy(true); try { return await action(); } catch (e) { notify(e.message, true); } finally { setBusy(false); } }
+  async function task(action) { setBusy(true); setNotice(null); try { return await action(); } catch (e) { notify(e.message, true); } finally { setBusy(false); } }
   function mutate(callback) { setDraft(old => { const next = copy(old); callback(next); return next; }); }
   function entries(kind = section) {
     if (!draft) return [];
+    if (kind === 'integrations') return [];
     const collection = kind === 'commands' ? draft.management.commands : kind === 'templates' ? draft.management.templates : kind === 'backends' ? draft.runtime.backends : kind === 'models' ? draft.profiles : draft.routes;
     return Array.isArray(collection) ? collection.map(value => [value.id, value]) : Object.entries(collection || {});
   }
@@ -113,6 +118,7 @@ function App() {
       const collection = kind === 'commands' ? config.management.commands : kind === 'templates' ? config.management.templates : kind === 'backends' ? config.runtime.backends : kind === 'models' ? config.profiles : config.routes;
       if (Array.isArray(collection)) { const index = collection.findIndex(row => row.id === oldId); if (index < 0) collection.splice(Math.max(0, collection.length - 1), 0, { ...value, id }); else collection[index] = { ...value, id }; }
       else { if (id !== oldId && collection[id]) throw new Error('此名称已存在'); if (oldId && id !== oldId) delete collection[oldId]; collection[id] = value; }
+      if (kind === 'commands' && oldId && oldId !== id) Object.values(config.management.integrations || {}).forEach(client => { client.commands = client.commands.map(name => name === oldId ? id : name); });
       if (kind === 'models') {
         config.management.labels ||= {};
         config.management.labels[`profile:${id}`] = extras.label || id;
@@ -128,7 +134,7 @@ function App() {
   }
 
   function remove(kind, id) {
-    setConfirm({ title: `删除 ${id}`, message: '删除会先写入草稿。应用时将检查命令、模型和路由之间的引用关系。', action: () => { mutate(config => { const collection = kind === 'commands' ? config.management.commands : kind === 'templates' ? config.management.templates : kind === 'backends' ? config.runtime.backends : kind === 'models' ? config.profiles : config.routes; if (Array.isArray(collection)) collection.splice(collection.findIndex(row => row.id === id), 1); else delete collection[id]; }); setConfirm(null); } });
+    setConfirm({ title: `删除 ${id}`, message: '删除会先写入草稿。应用时将检查命令、模型和路由之间的引用关系。', action: () => { mutate(config => { const collection = kind === 'commands' ? config.management.commands : kind === 'templates' ? config.management.templates : kind === 'backends' ? config.runtime.backends : kind === 'models' ? config.profiles : config.routes; if (Array.isArray(collection)) collection.splice(collection.findIndex(row => row.id === id), 1); else delete collection[id]; if (kind === 'commands') Object.values(config.management.integrations || {}).forEach(client => { client.commands = client.commands.filter(name => name !== id); }); }); setConfirm(null); } });
   }
 
   async function prepareApply() { await task(async () => { const data = await api('preview', { revision: snapshot.revision, config: draft }); setPreview(data); }); }
@@ -140,6 +146,10 @@ function App() {
       setSnapshot({ ...snapshot, config: data.config, revision: data.revision }); setDraft(copy(data.config)); setPreview(null);
       if (commandsChanged) await api('commands/install', {});
       if (serverChanged) await api('service/restart', {});
+      const integrationChanges = pretty(snapshot.config.management.integrations) !== pretty(data.config.management.integrations) || pretty(snapshot.config.profiles) !== pretty(data.config.profiles);
+      if (integrationChanges) {
+        for (const id of Object.keys(data.config.management.integrations || {})) await api('integrations/action', { id, action: 'sync', revision: data.revision });
+      }
       notify(serverChanged ? '配置已应用，转发服务已重启。' : '配置已应用。后续请求使用当前配置。');
       await load();
     });
@@ -157,9 +167,10 @@ function App() {
     <main>
       {status?.control_error && <div className="control-error" role="alert">管理连接中断：{status.control_error}</div>}
       <header className="topbar"><div className="breadcrumb">工作空间 <span>/</span> {active[1]}</div><div className="topbar-right"><span className={`status-pill ${status?.gateway_online ? '' : 'offline'}`}><i/>{status?.gateway_online ? '转发服务在线' : '转发服务离线'}</span><code className="gateway-address">{status?.gateway_url}</code><button className="icon-button" aria-label="刷新配置" onClick={() => dirty ? setConfirm({ title: '重新读取配置', message: '当前草稿尚未应用。重新读取会放弃这些草稿修改。', action: () => task(async () => { await load(); setConfirm(null); }) }) : task(load)}><Icon name="refresh"/></button></div></header>
-      <div className="page-content"><div className="page-heading"><div><div className="eyebrow">LOCAL ROUTING / {active[2]}</div><h1>{active[1]}</h1><p>{descriptions[section]}</p></div><div className="heading-actions">{section === 'commands' && <Button disabled={busy} onClick={() => task(async () => { const result = await api('commands/install', {}); notify(`已同步 ${result.installed.length} 个终端命令。`); })}><Icon name="terminal"/>同步终端入口</Button>}{section === 'settings' ? <Button primary onClick={editSettings}>编辑服务参数</Button> : <Button primary onClick={add}><Icon name="plus"/>新增{active[1].replace('启动','').replace('API ','').replace('配置','')}</Button>}</div></div>
-        <div className="summary-strip">{metrics.map(([title, count]) => <div key={title}><strong>{count.toString().padStart(2, '0')}</strong><span>{title}</span></div>)}<div className="summary-note"><span className="mini-label">配置状态</span><span className={dirty ? 'text-amber' : 'text-green'}>{dirty ? '有未应用的修改' : '与本机文件一致'}</span></div></div>
-        {section !== 'settings' && <div className="table-toolbar"><label className="search"><Icon name="search"/><input aria-label="搜索配置" value={query} onChange={e => setQuery(e.target.value)} placeholder={`搜索${active[1]}…`}/><kbd>⌕</kbd></label><span>{rows.length} 项配置</span></div>}
+      <div className="page-content"><div className="page-heading"><div><div className="eyebrow">LOCAL ROUTING / {active[2]}</div><h1>{active[1]}</h1><p>{descriptions[section]}</p></div><div className="heading-actions">{section === 'commands' && <Button disabled={busy} onClick={() => task(async () => { const result = await api('commands/install', {}); notify(`已同步 ${result.installed.length} 个终端命令。`); })}><Icon name="terminal"/>同步终端入口</Button>}{section === 'settings' ? <Button primary onClick={editSettings}>编辑服务参数</Button> : section !== 'integrations' && <Button primary onClick={add}><Icon name="plus"/>新增{active[1].replace('启动','').replace('API ','').replace('配置','')}</Button>}</div></div>
+        {section === 'integrations' && <IntegrationWorkspace config={draft} revision={snapshot.revision} dirty={dirty} api={api} ui={{Button,Field,Modal}} onEdit={setIntegrationEditor} onCommand={name => setEditor({kind:'commands',id:name,value:copy(draft.management.commands[name])})}/>}
+        {section !== 'integrations' && <div className="summary-strip">{metrics.map(([title, count]) => <div key={title}><strong>{count.toString().padStart(2, '0')}</strong><span>{title}</span></div>)}<div className="summary-note"><span className="mini-label">配置状态</span><span className={dirty ? 'text-amber' : 'text-green'}>{dirty ? '有未应用的修改' : '与本机文件一致'}</span></div></div>}
+        {!['settings','integrations'].includes(section) && <div className="table-toolbar"><label className="search"><Icon name="search"/><input aria-label="搜索配置" value={query} onChange={e => setQuery(e.target.value)} placeholder={`搜索${active[1]}…`}/><kbd>⌕</kbd></label><span>{rows.length} 项配置</span></div>}
         {section === 'commands' && <div className="table-panel"><table><thead><tr><th>终端命令</th><th>启动方式</th><th>默认模型与路由</th><th>状态</th><th/></tr></thead><tbody>{rows.map(([id, value]) => <tr key={id}><td><button className="command-name" onClick={() => setEditor({ kind: section, id, value: copy(value) })}><span>›</span>{id}</button><p className="cell-note">{value.label || '自定义命令入口'}</p></td><td>{draft.management.templates[value.template]?.label || value.template}<p className="cell-note">{draft.management.templates[value.template]?.deferred ? '保留客户端启动逻辑' : '使用配置的启动参数'}</p></td><td><span className="model-name">{value.profile ? label(value.profile) : draft.management.templates[value.template]?.request_path ? '使用现有路由' : '客户端原生模型'}</span><p className="cell-note mono">{startupModel(value)}</p></td><td><button className={`toggle-label ${value.enabled !== false ? 'on' : ''}`} onClick={() => mutate(config => { config.management.commands[id].enabled = value.enabled === false; })}><i/>{value.enabled !== false ? '可启动' : '已停用'}</button></td><td className="row-actions"><button onClick={() => task(async () => setDetails({ title: `${id} · 启动预览`, value: await api('commands/preview', { name: id, args: [] }) }))} disabled={dirty}>预览</button><button onClick={() => setEditor({ kind: section, id, value: copy(value) })}>编辑</button><button className="delete-link" onClick={() => remove(section, id)}>删除</button></td></tr>)}</tbody></table>{!rows.length && <Empty text="添加一个名称，将它关联到启动方式和模型路由。" onAdd={add}/>}</div>}
         {section === 'backends' && <div className="backend-grid">{rows.map(([id, value]) => <article className="backend-card" key={id}><header><div className="backend-icon"><Icon name="api"/></div><span className="subtle-badge">{value.auth?.token_command ? '命令凭据' : value.auth?.token_env ? '环境变量' : value.auth?.token_file ? '凭据文件' : '未配置认证'}</span></header><h3>{id}</h3><div className="backend-url mono">{value.base_url}</div><div className="backend-detail"><span>关联模型</span><strong>{Object.values(draft.profiles).filter(profile => profile.standard.target === id || profile.fast?.target === id).length}</strong></div><div className="backend-detail"><span>凭据来源</span><span className="truncate mono" title={value.auth?.token_file || value.auth?.token_env || value.auth?.token_command?.join(' ')}>{value.auth?.token_file?.split('/').pop() || value.auth?.token_env || value.auth?.token_command?.[0]?.split('/').pop() || '—'}</span></div><footer><Button onClick={() => setEditor({ kind: section, id, value: copy(value) })}>编辑接入</Button><button onClick={() => task(async () => setDetails({ title: `${id} · 模型列表`, value: await api('backends/probe', { id, path: '/v1/models' }) }))} disabled={dirty}>读取模型列表</button><button className="delete-link" onClick={() => remove(section, id)}>删除</button></footer></article>)}{!rows.length && <Empty text="填写 API 地址，并设置凭据来源。" onAdd={add}/>}</div>}
         {section === 'models' && <div className="table-panel"><table><thead><tr><th>模型配置</th><th>标准目标</th><th>Fast 目标</th><th>关联路由</th><th/></tr></thead><tbody>{rows.map(([id, value]) => <tr key={id}><td><strong>{label(id)}</strong><p className="cell-note mono">{id}</p></td><td><span className="mono">{value.standard.model || value.standard.model_template || '保留请求模型'}</span><p className="cell-note">{value.standard.target}{value.standard.provider && ` · ${value.standard.provider}`}</p></td><td><span className="mono">{value.fast?.model || (value.fast ? '保留请求模型' : '沿用标准目标')}</span><p className="cell-note">{value.fast?.target || '—'}</p></td><td>{draft.routes.filter(route => route.profile === id).length} 条</td><td className="row-actions"><button onClick={() => setEditor({ kind: section, id, value: copy(value) })}>编辑</button><button className="delete-link" onClick={() => remove(section, id)}>删除</button></td></tr>)}</tbody></table>{!rows.length && <Empty text="为 API 后端定义可调用的模型配置。" onAdd={add}/>}</div>}
@@ -171,6 +182,7 @@ function App() {
     </main>
     {notice && <div className={`toast ${notice.error ? 'toast-error' : ''}`} role="status"><Icon name={notice.error ? 'close' : 'check'}/><span>{notice.message}</span><button onClick={() => setNotice(null)} aria-label="关闭通知">×</button></div>}
     {editor && <Editor key={`${editor.kind}:${editor.id}`} editor={editor} config={draft} close={() => setEditor(null)} notify={notify} save={(id, value, extras) => { if (editor.kind === 'settings') { mutate(config => { config.runtime.server = value; }); setEditor(null); } else if (editor.kind === 'raw') { setDraft(value); setEditor(null); } else saveRecord(editor.kind, editor.id, id, value, extras); }}/ >}
+    {integrationEditor && <IntegrationEditor key={integrationEditor} id={integrationEditor} config={draft} ui={{Button,Field,Modal}} close={() => setIntegrationEditor(null)} onCommand={name => { setIntegrationEditor(null); setEditor({kind:'commands',id:name,value:copy(draft.management.commands[name])}); }} save={value => { mutate(config => { config.management.integrations[integrationEditor] = value; }); setIntegrationEditor(null); }}/ >}
     {preview && <Modal title="应用配置修改" eyebrow="REVIEW CHANGES" close={() => setPreview(null)} wide footer={<><Button onClick={() => setPreview(null)}>继续编辑</Button><Button primary disabled={busy} onClick={apply}>{pretty(snapshot.config.runtime.server) !== pretty(preview.config.runtime.server) ? '应用并重启服务' : '确认应用'}</Button></>}><div className="review-summary"><Icon name="check"/><div><strong>配置结构与路由验证通过</strong><p>{preview.validation_changes.length} 个验证用例的预期结果将随配置更新。</p></div></div>{pretty(snapshot.config.runtime.server) !== pretty(preview.config.runtime.server) && <div className="callout">转发服务参数发生变化，应用后会重启服务。</div>}{preview.validation_changes.length > 0 && <div className="review-list">{preview.validation_changes.map(change => <div key={change.name}><strong>{change.name}</strong><code>{change.after.rule_id} → {change.after.target} / {change.after.model}</code></div>)}</div>}<p className="muted">生效后，新的请求使用保存的路由配置。终端命令的启动参数在下次运行时读取。</p></Modal>}
     {details && <Modal title={details.title} close={() => setDetails(null)} wide footer={<Button onClick={() => setDetails(null)}>关闭</Button>}><pre className="code-preview">{pretty(details.value)}</pre></Modal>}
     {confirm && <Modal title={confirm.title} close={() => setConfirm(null)} footer={<><Button onClick={() => setConfirm(null)}>取消</Button><Button danger onClick={confirm.action}>确认</Button></>}><p>{confirm.message}</p></Modal>}

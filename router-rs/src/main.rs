@@ -18,6 +18,7 @@ use serde_json::Value;
 mod body;
 mod cli;
 mod control;
+mod integrations;
 mod prepare;
 mod routing;
 mod runtime;

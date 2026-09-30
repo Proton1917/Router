@@ -4,6 +4,8 @@
 !/router-rs/
 !/docs/
 !/scripts/
+/scripts/__pycache__/
+/scripts/.work/
 !/web/
 /web/node_modules/
 /web/dist/

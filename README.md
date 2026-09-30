@@ -61,6 +61,16 @@ npm run build --prefix web
 
 前端构建结果位于 `web/dist`。`management.assets_directory` 指向已部署的资源目录，运行时由 Rust 提供静态文件服务。`service_start`、`service_restart` 可声明外部服务管理命令；监听地址、超时等参数变化时，界面通过配置的重启命令应用。管理服务本身的监听或资源配置变化后，使用 `router web --restart` 重新加载。
 
+## 客户端接入
+
+网页的“客户端接入”按 `management.integrations` 展示客户端。终端入口可以直接进入命令编辑；桌面应用和 Office 插件可以逐个选择模型入口的 API 后端、模型配置及显示名称，调整模型目录可见性，并检查网关连接。需要 HTTPS 的客户端会拒绝 HTTP 地址。
+
+每个客户端声明协议、网关地址、检查路径、请求头和模型入口。模型入口保留客户端兼容 ID，并生成独立的上下文路由及验证用例。目录入口隐藏后，已有会话使用的路由继续保留。地址和目录同步在保存路由配置后执行；同步失败会显示错误，可以重新“应用已保存配置”。
+
+Rust 负责校验、路由生成、管理接口和有超时限制的适配程序调用。客户端目录格式和部署路径由外部配置及 `scripts/client-integrations.py` 管理。适配程序通过标准输入接收 JSON，通过标准输出返回包含 `ok` 的 JSON 结果，支持 `inspect`、`sync`、`check`。配置中的路径和命令可按部署环境调整。
+
+提供的适配程序支持活动 JSON 模型目录，以及 Office WebKit 中已有的插件接入存储。JSON 修改保留其他字段，Office 修改通过 SQLite 事务更新接入项，写入前在受保护目录保存备份。真实上游凭据仍由 router 单独读取，客户端使用本地占位令牌。Office 的首次安装或首次加载由宿主应用完成；同步后重新打开客户端或插件载入地址和目录，路由调整对后续请求生效。连接检查验证网关、HTTPS 证书及目录，不代表上游账号已获得所有模型权限。
+
 [配置示例](router-rs/examples/router.json) 分别声明 Messages 和 Responses 后端。部署时填写自己的地址和凭据来源。示例通过 `MESSAGES_API_KEY` 和 `RESPONSES_API_KEY` 环境变量读取凭据。模型由客户端选择，示例路由保留客户端传入的模型 ID。
 
 ## 配置边界
