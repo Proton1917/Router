@@ -8,6 +8,8 @@
 
 桌面版使用 Tauri 2 和 macOS 自带的 WebKit。当前提供 macOS 14 及以上版本的安装流程，已验证 Apple Silicon。应用包含 router 程序、网页和首次安装所需的配置示例，使用安装包时无需安装 Rust 或 Node.js。
 
+取得源码后，可按下文“从源码构建桌面安装包”生成安装镜像，再执行以下安装步骤。
+
 1. 打开 `Router_0.2.0_aarch64.dmg`，将 **Router.app** 拖入“应用程序”。
 2. 打开 Router。首次使用可以选择“创建新配置”，也可以通过“选择已有配置文件”接入已有 `router.json`。已有配置需包含 `management`，网页资源路径需存在。
 3. 创建配置时确认配置目录、终端入口目录和两个监听地址，点击“安装并打开控制台”。默认分别为 `~/.config/router`、`~/.local/bin`、`127.0.0.1:8080` 和 `127.0.0.1:8081`。已有文件或端口冲突会显示具体错误。
@@ -41,6 +43,8 @@
 取得源码后，在项目根目录执行。需要 macOS 14+、Xcode Command Line Tools、Rust stable（Tauri 2.12 要求至少 Rust 1.90）、Node.js 20.19+ 或 22.12+，以及 npm。依赖由 Cargo 和 npm 锁文件固定。
 
 ```sh
+git clone https://github.com/Proton1917/Router.git
+cd Router
 npm ci --prefix desktop
 npm run build --prefix desktop
 ```
@@ -270,3 +274,7 @@ cargo build --release --manifest-path router-rs/Cargo.toml
 ## 本地文件与 Git
 
 仓库纳入源码、Cargo 清单与锁文件、配置示例和文档。根目录采用明确的纳入清单；本机部署配置、客户端设置、凭据、日志、备份、运行二进制和中间文件均不在提交范围内。Rust 构建目录及源码备份由附加规则排除。
+
+## 许可证
+
+本项目采用 [MIT License](LICENSE)，允许商业使用、修改、再分发及闭源使用。分发代码或其重要部分时，须保留版权声明和许可证全文。第三方依赖遵循各自的许可证。

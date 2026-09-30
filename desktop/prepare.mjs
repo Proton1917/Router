@@ -11,6 +11,7 @@ execFileSync('npm', ['run', 'build', '--prefix', 'web'], { cwd: root, stdio: 'in
 const resources = `${desktop}src-tauri/resources`;
 rmSync(resources, { recursive: true, force: true });
 mkdirSync(resources, { recursive: true });
+cpSync(`${root}LICENSE`, `${resources}/LICENSE`);
 cpSync(`${root}router-rs/target/release/router`, `${resources}/router`);
 cpSync(`${root}web/dist`, `${resources}/web`, { recursive: true });
 cpSync(`${desktop}appearance.json`, `${resources}/appearance.json`);

@@ -2,6 +2,7 @@
   "name": "router-web",
   "private": true,
   "version": "0.2.0",
+  "license": "MIT",
   "type": "module",
   "scripts": {"dev": "vite --host 127.0.0.1", "build": "vite build"},
   "dependencies": {"react": "19.3.0", "react-dom": "19.3.0", "@microsoft/fetch-event-source": "2.0.1"},
