@@ -9,10 +9,51 @@
 ```sh
 cargo build --release --manifest-path router-rs/Cargo.toml
 ./router-rs/target/release/router --config router-rs/examples/router.json --check
-./router-rs/target/release/router --config /path/to/router.json
+./router-rs/target/release/router --config /path/to/router.json serve
 ```
 
-`--config` 为必填参数，也可以通过 `ROUTER_CONFIG` 设置。`--listen` 或 `ROUTER_ADDR` 可以覆盖配置中的监听地址。`--check` 校验配置及其全部路由断言，然后退出。
+执行服务与管理操作时，通过 `--config` 或 `ROUTER_CONFIG` 指定配置文件；帮助与版本命令可直接运行。`--listen` 或 `ROUTER_ADDR` 可以覆盖配置中的监听地址。`--check` 校验配置及其全部路由断言，然后退出。
+
+直接运行 `router` 或 `router --help` 查看命令列表。服务使用 `router serve` 启动；管理入口使用 `router web` 启动。
+
+## CLI 与本地管理界面
+
+```sh
+router web
+router web --restart
+router status
+router commands list
+router commands add my-client --template responses-client --model '<model-id>' --profile responses
+router commands install
+router run my-client -- --version
+router run my-client --dry-run
+router backends list
+router models list
+router routes list
+router templates list
+router config check
+```
+
+命令名称来自 `management.commands`。每个命令可以选择启动方式、默认模型、独立模型路由、附加参数和环境变量。启动方式定义程序、参数、模型参数标记、API 请求标记及可选的启动器集成。模板使用 MiniJinja，提供 `config`、`command_name`、`command`、`model`、`profile`、`gateway_url`、`command_header` 和 `headers_text` 等变量。
+
+`router web` 确保转发服务运行，启动独立的管理 HTTP 服务并按照 `management.browser` 打开浏览器。示例使用 Safari。网页包括启动命令、API 后端、模型配置、路由规则、启动方式及服务设置。常用参数使用表单编辑，完整 JSON 编辑保留全部配置能力。
+
+修改先进入浏览器草稿，应用前校验配置结构、引用关系和路由用例，并展示受影响的用例。保存使用文件锁、版本摘要和原子替换，过期版本会被拒绝。命令绑定生成带有独立请求头的路由；启动模型名称可以按协议配置在 `management.profile_models` 中，后端协议声明由 `management.backend_protocols` 保存。
+
+终端入口通过 `router commands install` 同步。`router` 主命令安装到 `launcher_directory`，客户端命令生成为 Zsh 函数，避免影响外部程序查找同名系统可执行文件。将返回的 `shell_init` 文件在 `.zshrc` 中加载一次，后续新增和重命名在终端提示符或命令执行前同步。已有终端首次接入时需要重新加载此初始化文件。
+
+`backends`、`models`、`routes`、`templates` 支持 `list`、`get <id>`、`put <id> --file <json>` 和 `remove <id>`。命令支持 `add`、`put`、`remove`、`install`。`router config apply --file <json>` 应用完整配置；`router config management --file <json>` 只导入管理部分并保留现有后端和路由。`router credentials set <id> --file <key-file>` 把密钥写入独立受保护文件，不打印密钥值。
+
+管理服务仅监听 loopback 地址，使用独立随机令牌，检查 Host 和 Origin；API 响应禁止缓存。密钥输入只写入 `credential_directory`，网页和配置中保存文件路径。该目录必须位于 Git 工作区之外。环境变量凭据需由转发进程继承，命令凭据需向标准输出提供令牌。
+
+使用随附的 [管理配置示例](router-rs/examples/management.json) 时，可把运行配置放在 `~/.config/router/router.json`，将已安装的原生程序和前端资源分别放在 `~/.local/share/router/bin/router` 与 `~/.local/share/router/web`，再导入管理配置。示例中的相对目录按该布局解析。自有路由配置应在启动方式中调整 `route_before`。
+
+```sh
+npm ci --prefix web
+npm run build --prefix web
+```
+
+前端构建结果位于 `web/dist`。`management.assets_directory` 指向已部署的资源目录，运行时由 Rust 提供静态文件服务。`service_start`、`service_restart` 可声明外部服务管理命令；监听地址、超时等参数变化时，界面通过配置的重启命令应用。管理服务本身的监听或资源配置变化后，使用 `router web --restart` 重新加载。
 
 [配置示例](router-rs/examples/router.json) 分别声明 Messages 和 Responses 后端。部署时填写自己的地址和凭据来源。示例通过 `MESSAGES_API_KEY` 和 `RESPONSES_API_KEY` 环境变量读取凭据。模型由客户端选择，示例路由保留客户端传入的模型 ID。
 

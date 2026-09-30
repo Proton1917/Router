@@ -4,18 +4,20 @@ use anyhow::{Context, Result, bail};
 use axum::{
     Router,
     body::Body,
-    extract::{Request, State},
+    extract::{Query, Request, State},
     http::{HeaderMap, HeaderName, Method, StatusCode, Uri},
     response::{IntoResponse, Response},
     routing::get,
 };
 use bytes::Bytes;
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use futures_util::StreamExt;
 use reqwest::Client;
 use serde_json::Value;
 
 mod body;
+mod cli;
+mod control;
 mod prepare;
 mod routing;
 mod runtime;
@@ -45,8 +47,22 @@ struct ClientSettings {
 #[tokio::main]
 async fn main() -> Result<()> {
     let arguments = Arguments::parse();
-    let config_path =
-        fs::canonicalize(&arguments.config).context("configuration file is unavailable")?;
+    if arguments.command.is_none() && !arguments.check {
+        Arguments::command().print_help()?;
+        println!();
+        return Ok(());
+    }
+    let config_path = fs::canonicalize(
+        arguments
+            .config
+            .context("请使用 --config 或 ROUTER_CONFIG 指定配置文件")?,
+    )
+    .context("configuration file is unavailable")?;
+    if let Some(command) = arguments.command
+        && !matches!(command, server::RouterCommand::Serve)
+    {
+        return cli::dispatch(&config_path, command).await;
+    }
     let config = load_router_runtime_config(&config_path)?;
     let server = config
         .runtime
@@ -84,7 +100,7 @@ async fn main() -> Result<()> {
     };
 
     let app = Router::new()
-        .route(&state.server.health_path, get(|| async { "ok" }))
+        .route(&state.server.health_path, get(health))
         .fallback(proxy)
         .with_state(state);
 
@@ -98,6 +114,16 @@ async fn main() -> Result<()> {
 
 async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
+}
+
+async fn health(
+    State(state): State<AppState>,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    if query.get("format").is_some_and(|value| value == "json") {
+        return axum::Json(serde_json::json!({"service":"router","version":env!("CARGO_PKG_VERSION"),"config_id":blake3::hash(state.runtime_routing_config.to_string_lossy().as_bytes()).to_hex().to_string()})).into_response();
+    }
+    "ok".into_response()
 }
 
 async fn proxy(State(state): State<AppState>, req: Request) -> Response {

@@ -4,6 +4,15 @@
 !/router-rs/
 !/docs/
 !/scripts/
+!/web/
+/web/node_modules/
+/web/dist/
+/web/.work/
+/web/.env
+/web/.env.*
+/web/*.local
+/web/*.log
+/web/.DS_Store
 /router-rs/*
 !/router-rs/.gitignore
 !/router-rs/Cargo.toml
@@ -14,6 +23,7 @@
 !/router-rs/src/*.rs
 /router-rs/examples/*
 !/router-rs/examples/router.json
+!/router-rs/examples/management.json
 /router-rs/target/
 /router-rs/.work/
 /router-rs/**/.DS_Store

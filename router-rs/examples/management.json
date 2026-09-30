@@ -1,0 +1,45 @@
+{
+  "listen": "127.0.0.1:8081",
+  "assets_directory": "../../.local/share/router/web",
+  "token_file": "control-token",
+  "credential_directory": "credentials",
+  "launcher_directory": "../../.local/bin",
+  "shell_file": "commands.zsh",
+  "log_directory": "logs",
+  "browser": {"program": "open", "args": ["-a", "Safari", "{{ url }}"]},
+  "command_header": "x-router-command",
+  "max_request_bytes": 16777216,
+  "backend_protocols": {"messages": ["messages"], "responses": ["responses"]},
+  "templates": {
+    "messages-client": {
+      "label": "Claude Code API",
+      "description": "通过网关调用兼容 Messages 的后端。",
+      "program": "claude",
+      "args": [],
+      "model_flags": ["--model"],
+      "header_env": "ANTHROPIC_CUSTOM_HEADERS",
+      "request_path": "/v1/messages",
+      "route_before": "messages",
+      "env": {"ANTHROPIC_BASE_URL": "{{ gateway_url }}", "ANTHROPIC_AUTH_TOKEN": "local-router", "ANTHROPIC_API_KEY": ""}
+    },
+    "responses-client": {
+      "label": "Codex API",
+      "description": "通过网关调用原生 Responses 后端。",
+      "program": "codex",
+      "args": ["-c", "model_provider=\"router\"", "-c", "model_providers.router.name=\"router\"", "-c", "model_providers.router.base_url=\"{{ gateway_url }}/v1\"", "-c", "model_providers.router.wire_api=\"responses\"", "-c", "model_providers.router.requires_openai_auth=false", "-c", "model_providers.router.supports_websockets=false", "-c", "model_providers.router.http_headers.\"{{ command_header }}\"=\"{{ command_name }}\""],
+      "model_flags": ["--model", "-m"],
+      "request_path": "/v1/responses",
+      "route_before": "responses",
+      "unset_env": ["OPENAI_API_KEY", "OPENAI_BASE_URL"]
+    },
+    "account-client": {
+      "label": "Codex 登录",
+      "description": "使用客户端的 ChatGPT 登录凭据和原生模型。",
+      "program": "codex",
+      "args": ["-c", "model_provider=\"openai\"", "-c", "forced_login_method=\"chatgpt\""],
+      "model_flags": ["--model", "-m"],
+      "unset_env": ["OPENAI_API_KEY", "OPENAI_BASE_URL"]
+    }
+  },
+  "commands": {}
+}

@@ -14,6 +14,8 @@ use crate::runtime::{
 pub struct RouterConfig {
     pub schema_version: u32,
     pub runtime: RuntimeConfig,
+    #[serde(default)]
+    pub management: Option<crate::control::Management>,
     pub profiles: HashMap<String, ModelProfile>,
     pub routes: Vec<RouteRule>,
     #[serde(default, rename = "catalog", alias = "word_gateway")]
@@ -236,6 +238,9 @@ impl RouterConfig {
     }
 
     fn validate(&self) -> Result<()> {
+        if let Some(management) = &self.management {
+            management.validate()?;
+        }
         if self.schema_version != 2 {
             bail!("schema_version must be 2");
         }
