@@ -30,7 +30,7 @@ cargo build --release --manifest-path router-rs/Cargo.toml
 | `catalog` | 可选模型目录、模型元数据及 Messages 兼容参数 |
 | `validation_cases` | 配置加载时执行的路由断言 |
 
-路由、客户端、模型、供应商、凭据文件、接口映射和处理策略在每次请求时重新读取。监听地址、健康检查路径及 HTTP 连接／请求超时的变更需要重新启动服务。以上配置变更均不需要重新编译。
+路由、客户端、模型、供应商、凭据文件、接口映射和处理策略在每次请求时重新读取。监听地址、健康检查路径、HTTP 超时及正文处理资源配置的变更需要重新启动服务。以上配置变更均不需要重新编译。
 
 Rust 实现配置校验、规则执行、HTTP 传输和协议编解码。增加现有配置能够表达的后端或客户端，只需修改 JSON；增加新的协议编解码能力时需要修改对应实现。
 
@@ -80,6 +80,21 @@ supports_websockets = false
 
 配置字段依据 [OpenAI 官方配置文档](https://learn.chatgpt.com/docs/config-file/config-reference)。上游应原生支持 Responses；router 将 HTTP 请求与 SSE 流转发到配置的后端。客户端是否支持某个模型和功能，还取决于该后端实现。
 
+## 正文处理与内存
+
+仅依赖路径和请求头、且不修改正文的路由直接流式转发请求和响应。需要读取模型、检查最后一条用户消息或执行字段策略时，请求写入指定目录中的匿名临时文件；JSON 由流式解析库验证并建立字段位置索引。改写时复制未变化的原始片段，按需读取控制字段和目标子树。日志使用已经提取的路由信息。
+
+`runtime.server.body_processing` 配置如下：
+
+| 字段 | 作用 |
+| --- | --- |
+| `spool_directory` | 请求暂存目录，可相对于配置文件；Unix 目录权限为 `0700`，临时文件创建后立即解除目录链接 |
+| `io_buffer_bytes` | 文件读取、文本处理和上传缓冲大小，示例为 64 KiB |
+| `metadata_limit_bytes` | 单次载入的路由控制字段大小上限，示例为 4 MiB；上下文正文按块处理 |
+| `max_concurrent_requests` | 同时接收及处理正文的请求数量，示例为 8；额外请求等待处理名额 |
+
+原样转发的内存主要由传输缓冲构成。字段改写的内存主要由缓冲、控制字段及当前对象的字段索引构成；正文暂存磁盘空间随请求大小增长，文件描述符关闭后释放。取消请求时同样释放临时文件。内容检查需要遍历输入；字段策略按声明顺序执行，处理时间与输入大小及策略数量有关。Messages 的非流式响应兼容和搜索适配仍按各自的响应协议处理。
+
 ## 验证
 
 ```sh
@@ -89,7 +104,7 @@ cargo clippy --manifest-path router-rs/Cargo.toml --all-targets -- -D warnings
 cargo build --release --manifest-path router-rs/Cargo.toml
 ```
 
-测试默认读取随源码提供的配置示例。设置 `ROUTER_TEST_CONFIG=/absolute/path/router.json` 可以验证实际部署配置。诊断请求头及允许值由 `runtime.server` 定义，诊断结果展示目标与变换后的字段，不执行上游调用。
+测试默认读取随源码提供的配置示例。设置 `ROUTER_TEST_CONFIG=/absolute/path/router.json` 可以验证实际部署配置；同时设置 `ROUTER_TEST_REQUEST=/absolute/path/request.json`，可以用真实请求逐项重放配置中的路由用例，核对文件处理与 JSON 语义参考实现的结果。请求材料应保存在 Git 忽略的目录中。诊断请求头及允许值由 `runtime.server` 定义，诊断结果展示目标与变换后的字段，不执行上游调用。
 
 ## 本地文件与 Git
 

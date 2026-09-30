@@ -223,6 +223,11 @@ pub struct ResolvedRoute {
     pub header_policy: HeaderPolicy,
 }
 
+struct MatchBody<'a> {
+    value: &'a Value,
+    known_markers: Option<&'a [String]>,
+}
+
 impl RouterConfig {
     pub fn from_json(bytes: &[u8]) -> Result<Self> {
         let config: Self = serde_json::from_slice(bytes).context("config must be valid JSON")?;
@@ -436,6 +441,25 @@ impl RouterConfig {
         settings_fast_mode: bool,
         settings_model: Option<&str>,
     ) -> Result<ResolvedRoute> {
+        self.resolve_with_markers(
+            context,
+            headers,
+            body,
+            settings_fast_mode,
+            settings_model,
+            None,
+        )
+    }
+
+    pub fn resolve_with_markers(
+        &self,
+        context: &str,
+        headers: &HeaderMap,
+        body: &Value,
+        settings_fast_mode: bool,
+        settings_model: Option<&str>,
+        known_markers: Option<&[String]>,
+    ) -> Result<ResolvedRoute> {
         let model = body
             .pointer(&self.runtime.selection.model_pointer)
             .and_then(Value::as_str)
@@ -451,7 +475,10 @@ impl RouterConfig {
                 route.matcher.matches(
                     context,
                     headers,
-                    body,
+                    MatchBody {
+                        value: body,
+                        known_markers,
+                    },
                     model,
                     settings_model,
                     &self.runtime.selection,
@@ -525,11 +552,15 @@ impl RouteMatch {
         &self,
         context: &str,
         headers: &HeaderMap,
-        body: &Value,
+        payload: MatchBody<'_>,
         model: &str,
         settings_model: Option<&str>,
         selection: &SelectionPolicy,
     ) -> bool {
+        let MatchBody {
+            value: body,
+            known_markers,
+        } = payload;
         if !self.contexts.is_empty() && !self.contexts.iter().any(|candidate| candidate == context)
         {
             return false;
@@ -582,6 +613,12 @@ impl RouteMatch {
             return false;
         }
         if !self.last_user_contains_all.is_empty() {
+            if let Some(markers) = known_markers {
+                return self
+                    .last_user_contains_all
+                    .iter()
+                    .all(|marker| markers.contains(marker));
+            }
             let Some(last_user_content) = last_user_content(body) else {
                 return false;
             };
@@ -598,6 +635,7 @@ impl RouteMatch {
 }
 
 impl ResolvedRoute {
+    #[cfg(test)]
     pub fn apply_reasoning_policy(&self, body: &mut Value) -> Result<()> {
         let Some(policy) = &self.reasoning_policy else {
             return Ok(());
@@ -626,6 +664,7 @@ impl ResolvedRoute {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn apply_field_policy(&self, body: &mut Value) -> Result<()> {
         if let Some(retained) = &self.field_policy.retain_top_level {
             let retained = retained.iter().map(String::as_str).collect::<HashSet<_>>();
@@ -905,6 +944,7 @@ fn provider_override(headers: &HeaderMap, spec: &ProviderOverride) -> Option<Str
     Some((*provider).to_string())
 }
 
+#[cfg(test)]
 fn take_json_pointer(root: &mut Value, pointer: &str) -> Option<Value> {
     let (parent_pointer, leaf) = split_json_pointer(pointer)?;
     let parent = if parent_pointer.is_empty() {
@@ -917,6 +957,7 @@ fn take_json_pointer(root: &mut Value, pointer: &str) -> Option<Value> {
         .remove(&decode_json_pointer_token(leaf)?)
 }
 
+#[cfg(test)]
 fn remove_json_path(root: &mut Value, pointer: &str) {
     let Some(tokens) = pointer
         .split('/')
@@ -929,6 +970,7 @@ fn remove_json_path(root: &mut Value, pointer: &str) {
     remove_json_path_tokens(root, &tokens);
 }
 
+#[cfg(test)]
 fn remove_json_path_tokens(current: &mut Value, tokens: &[String]) {
     let Some((head, tail)) = tokens.split_first() else {
         return;
@@ -960,6 +1002,7 @@ fn remove_json_path_tokens(current: &mut Value, tokens: &[String]) {
     }
 }
 
+#[cfg(test)]
 fn replace_text_lines_at_path(
     current: &mut Value,
     tokens: &[String],
@@ -1059,6 +1102,7 @@ fn decode_json_pointer_token(token: &str) -> Option<String> {
     Some(decoded)
 }
 
+#[cfg(test)]
 fn drop_null_fields(value: &mut Value) {
     match value {
         Value::Array(items) => {

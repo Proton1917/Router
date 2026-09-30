@@ -26,6 +26,16 @@ pub struct ServerConfig {
     pub dry_run_header: String,
     pub dry_run_values: Vec<String>,
     pub endpoints: HashMap<String, Protocol>,
+    pub body_processing: BodyProcessing,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BodyProcessing {
+    pub spool_directory: PathBuf,
+    pub io_buffer_bytes: usize,
+    pub metadata_limit_bytes: usize,
+    pub max_concurrent_requests: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -50,6 +60,13 @@ impl ServerConfig {
     }
 
     pub fn validate(&self) -> Result<()> {
+        if self.body_processing.io_buffer_bytes == 0
+            || self.body_processing.metadata_limit_bytes == 0
+            || self.body_processing.max_concurrent_requests == 0
+            || self.body_processing.spool_directory.as_os_str().is_empty()
+        {
+            bail!("body_processing requires a directory and positive resource limits");
+        }
         if !self.health_path.starts_with('/') || self.health_path.contains('?') {
             bail!("server.health_path must be an absolute URL path");
         }

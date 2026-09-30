@@ -15,6 +15,8 @@ use futures_util::StreamExt;
 use reqwest::Client;
 use serde_json::Value;
 
+mod body;
+mod prepare;
 mod routing;
 mod runtime;
 mod server;
@@ -22,16 +24,16 @@ mod server;
 use server::{Arguments, Protocol, ServerConfig};
 
 use routing::{ResolvedRoute, RouterConfig};
-use runtime::{
-    AuthConfig, BackendConfig, ClientConfig, CorsPolicy, PayloadNormalization, SettingsSource,
-    ToolDefaults, WebSearchPolicy,
-};
+use runtime::{AuthConfig, BackendConfig, ClientConfig, CorsPolicy, SettingsSource};
+#[cfg(test)]
+use runtime::{PayloadNormalization, ToolDefaults, WebSearchPolicy};
 
 #[derive(Clone)]
 struct AppState {
     client: Client,
     runtime_routing_config: Arc<PathBuf>,
     server: Arc<ServerConfig>,
+    processing: Arc<tokio::sync::Semaphore>,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -55,6 +57,15 @@ async fn main() -> Result<()> {
         return Ok(());
     }
     let addr = arguments.listen.unwrap_or(server.listen);
+    fs::create_dir_all(&server.body_processing.spool_directory)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(
+            &server.body_processing.spool_directory,
+            fs::Permissions::from_mode(0o700),
+        )?;
+    }
     let state = AppState {
         client: Client::builder()
             .no_gzip()
@@ -66,6 +77,9 @@ async fn main() -> Result<()> {
             .build()
             .context("failed to build HTTP client")?,
         runtime_routing_config: Arc::new(config_path),
+        processing: Arc::new(tokio::sync::Semaphore::new(
+            server.body_processing.max_concurrent_requests,
+        )),
         server: Arc::new(server),
     };
 
@@ -127,6 +141,7 @@ async fn proxy_inner(
         || server.health_path != state.server.health_path
         || server.connect_timeout_ms != state.server.connect_timeout_ms
         || server.request_timeout_ms != state.server.request_timeout_ms
+        || server.body_processing != state.server.body_processing
     {
         bail!("listener or transport configuration changed; restart the router to apply it");
     }
@@ -140,25 +155,52 @@ async fn proxy_inner(
         return cors_preflight_response(&headers, &runtime_config.runtime.cors);
     }
 
-    let body_bytes = axum::body::to_bytes(body, server.max_request_bytes)
-        .await
-        .context("failed to read request body")?;
-
-    let word_stream_response =
-        word_gateway && messages_protocol && body_requests_stream(&body_bytes);
     if word_gateway && method == Method::GET && protocol == Protocol::Models {
         eprintln!("{method} {uri} word=true -> local models");
         return word_models_response(runtime_config);
     }
     let client_settings = configured_client_settings(client, &headers);
-    let request_json = serde_json::from_slice::<Value>(&body_bytes).unwrap_or(Value::Null);
-    let resolved_route = runtime_config.resolve(
-        &client.id,
-        &headers,
-        &request_json,
-        client_settings.fast_mode,
-        client_settings.model.as_deref(),
-    )?;
+    if !word_gateway
+        && !is_dry_run(&headers, server)
+        && protocol != Protocol::Messages
+        && protocol != Protocol::Models
+        && let Some(route) =
+            transparent_route(runtime_config, &client.id, &headers, &client_settings)?
+    {
+        return forward_streaming(
+            &state,
+            body,
+            &method,
+            &uri,
+            &headers,
+            runtime_config,
+            &route,
+        )
+        .await;
+    }
+    let permit = state.processing.clone().acquire_owned().await?;
+    let incoming =
+        body::JsonBody::receive(body, &server.body_processing, server.max_request_bytes).await?;
+    let config = runtime_config.clone();
+    let context = client.id.clone();
+    let request_headers = headers.clone();
+    let prepared = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        prepare::prepare(
+            incoming,
+            &config,
+            &context,
+            &request_headers,
+            &client_settings,
+            word_gateway,
+            protocol,
+        )
+    })
+    .await
+    .context("request processing task failed")??;
+    let resolved_route = &prepared.route;
+    let requested_stream = prepared.requested_stream;
+    let word_stream_response = word_gateway && messages_protocol && requested_stream;
     let target = resolved_route.target.as_str();
     let backend = runtime_config
         .runtime
@@ -172,45 +214,13 @@ async fn proxy_inner(
     {
         bail!("selected adapter is incompatible with the configured endpoint protocol");
     }
-    let routed_body = if protocol == Protocol::Passthrough {
-        body_bytes.to_vec()
-    } else {
-        apply_resolved_route(
-            &body_bytes,
-            &resolved_route,
-            word_gateway && messages_protocol,
-            runtime_config,
-        )?
-    };
-    let requested_stream = body_requests_stream(&body_bytes);
-    let (outgoing_body, openrouter_web_search_tools) = if let Some(policy) = &backend.web_search
-        && messages_protocol
-    {
-        bridge_openrouter_web_search_request(&routed_body, requested_stream, policy)
-    } else {
-        (routed_body, 0)
-    };
-    let openrouter_web_search_bridge = openrouter_web_search_tools > 0;
-    let openrouter_web_search_model = openrouter_web_search_bridge
-        .then(|| model_from_body(&outgoing_body).unwrap_or_else(|| "-".to_string()));
-    if openrouter_web_search_bridge {
-        eprintln!(
-            "OpenRouter web search bridge: model={} tools_rewritten={} max_tokens={} stream={}",
-            openrouter_web_search_model.as_deref().unwrap_or("-"),
-            openrouter_web_search_tools,
-            serde_json::from_slice::<Value>(&outgoing_body)
-                .ok()
-                .and_then(|json| json.get("max_tokens").and_then(Value::as_u64))
-                .unwrap_or(0),
-            body_requests_stream(&outgoing_body)
-        );
-    }
-    let nonstream_upstream_response = !word_gateway
-        && messages_protocol
-        && requested_stream
-        && !body_requests_stream(&outgoing_body);
+    let openrouter_web_search_bridge = prepared.search_tools > 0;
+    let openrouter_web_search_model =
+        openrouter_web_search_bridge.then(|| resolved_route.model.clone().unwrap_or_default());
+    let nonstream_upstream_response =
+        !word_gateway && messages_protocol && requested_stream && !prepared.outgoing_stream;
     let filter_openrouter_done =
-        backend.filter_sse_done && messages_protocol && body_requests_stream(&outgoing_body);
+        backend.filter_sse_done && messages_protocol && prepared.outgoing_stream;
     let upstream_url = upstream_url(backend, &uri);
     let response_cache_ttl = (!openrouter_web_search_bridge
         && backend
@@ -219,25 +229,25 @@ async fn proxy_inner(
             .is_some_and(|cache| cache.paths.iter().any(|path| path == uri.path())))
     .then_some(resolved_route.response_cache_ttl_seconds)
     .flatten();
-    log_route(
-        &resolved_route.rule_id,
-        target,
-        word_gateway,
-        &method,
-        &uri,
-        &body_bytes,
-        &outgoing_body,
+    eprintln!(
+        "{method} {uri} rule={} model={} outgoing={} bytes={} outgoing_bytes={} stream={} -> {target}",
+        resolved_route.rule_id,
+        prepared.original_model,
+        resolved_route.model.as_deref().unwrap_or_default(),
+        prepared.original_bytes,
+        prepared.body.len,
+        prepared.outgoing_stream
     );
 
     if is_dry_run(&headers, server) {
-        return dry_run_response(&resolved_route, backend, &uri, &body_bytes, &outgoing_body);
+        return dry_run_response(resolved_route, backend, &uri, &prepared);
     }
 
     let mut builder = state.client.request(method.clone(), upstream_url);
     builder = copy_request_headers(
         builder,
         &headers,
-        &resolved_route,
+        resolved_route,
         &runtime_config.runtime.strip_request_headers,
     );
     if let Some(auth) = &backend.auth {
@@ -253,7 +263,8 @@ async fn proxy_inner(
     }
 
     let upstream = builder
-        .body(outgoing_body)
+        .header("content-length", prepared.body.len)
+        .body(prepared.body.into_http_body().await?)
         .send()
         .await
         .context("failed to send upstream request")?;
@@ -385,6 +396,137 @@ async fn apply_backend_auth(
     Ok(builder)
 }
 
+fn transparent_route(
+    config: &RouterConfig,
+    context: &str,
+    headers: &HeaderMap,
+    settings: &ClientSettings,
+) -> Result<Option<ResolvedRoute>> {
+    for rule in &config.routes {
+        let matcher = &rule.matcher;
+        if !matcher.contexts.is_empty() && !matcher.contexts.iter().any(|id| id == context)
+            || !matcher
+                .headers
+                .iter()
+                .all(|predicate| predicate.matches(headers))
+            || matcher
+                .absent_headers
+                .iter()
+                .any(|name| headers.contains_key(name))
+        {
+            continue;
+        }
+        if !matcher.models.is_empty()
+            || !matcher.model_prefixes.is_empty()
+            || !matcher.model_contains.is_empty()
+            || matcher.stream.is_some()
+            || !matcher.last_user_contains_all.is_empty()
+        {
+            return Ok(None);
+        }
+        if !matcher.settings_models.is_empty()
+            && !settings.model.as_ref().is_some_and(|model| {
+                matcher
+                    .settings_models
+                    .iter()
+                    .any(|expected| config.runtime.selection.model_ids_match(expected, model))
+            })
+        {
+            continue;
+        }
+        let profile = &config.profiles[&rule.profile];
+        let destination = &profile.standard;
+        if profile.fast.is_some()
+            || profile.provider_override.is_some()
+            || destination.model.is_some()
+            || destination.model_template.is_some()
+            || destination.provider.is_some()
+            || destination.reasoning_adapter.is_some()
+            || destination.force_nonstream
+            || destination.response_cache_ttl_seconds.is_some()
+            || destination.payload_normalization != runtime::PayloadNormalization::default()
+            || destination.field_policy != routing::FieldPolicy::default()
+        {
+            return Ok(None);
+        }
+        return config
+            .resolve(
+                context,
+                headers,
+                &Value::Null,
+                settings.fast_mode,
+                settings.model.as_deref(),
+            )
+            .map(Some);
+    }
+    Ok(None)
+}
+
+async fn forward_streaming(
+    state: &AppState,
+    body: Body,
+    method: &Method,
+    uri: &Uri,
+    headers: &HeaderMap,
+    config: &RouterConfig,
+    route: &ResolvedRoute,
+) -> Result<Response> {
+    let backend = &config.runtime.backends[&route.target];
+    let server = config
+        .runtime
+        .server
+        .as_ref()
+        .context("runtime.server is required")?;
+    let max = server.max_request_bytes;
+    let permit = state.processing.clone().acquire_owned().await?;
+    let stream = body.into_data_stream().scan(0usize, move |total, chunk| {
+        let _ = &permit;
+        let chunk = chunk.map_err(std::io::Error::other).and_then(|chunk| {
+            *total = total.saturating_add(chunk.len());
+            if *total > max {
+                Err(std::io::Error::other(
+                    "request exceeds configured byte limit",
+                ))
+            } else {
+                Ok(chunk)
+            }
+        });
+        futures_util::future::ready(Some(chunk))
+    });
+    let mut builder = copy_request_headers(
+        state
+            .client
+            .request(method.clone(), upstream_url(backend, uri)),
+        headers,
+        route,
+        &config.runtime.strip_request_headers,
+    );
+    if let Some(auth) = &backend.auth {
+        builder = apply_backend_auth(builder, auth).await?;
+    }
+    for (name, value) in &route.header_policy.set {
+        builder = builder.header(name, value);
+    }
+    let upstream = builder
+        .body(reqwest::Body::wrap_stream(stream))
+        .send()
+        .await?;
+    eprintln!(
+        "{method} {} rule={} transfer=streaming -> {} status={}",
+        uri.path(),
+        route.rule_id,
+        route.target,
+        upstream.status()
+    );
+    let mut response = Response::builder().status(upstream.status());
+    for (name, value) in upstream.headers() {
+        if should_forward_response_header(name) {
+            response = response.header(name, value);
+        }
+    }
+    Ok(response.body(Body::from_stream(upstream.bytes_stream()))?)
+}
+
 fn cors_preflight_response(headers: &HeaderMap, policy: &CorsPolicy) -> Result<Response> {
     let allow_headers = headers
         .get("access-control-request-headers")
@@ -406,6 +548,7 @@ fn cors_preflight_response(headers: &HeaderMap, policy: &CorsPolicy) -> Result<R
         .context("failed to build CORS preflight response")
 }
 
+#[cfg(test)]
 fn apply_resolved_route(
     body: &[u8],
     route: &ResolvedRoute,
@@ -554,15 +697,6 @@ fn header_parameter<'a>(headers: &'a HeaderMap, name: &str, key: &str) -> Option
         .filter(|value| !value.is_empty())
 }
 
-fn configured_effort(obj: &serde_json::Map<String, Value>) -> Option<String> {
-    obj.get("output_config")
-        .and_then(|value| value.get("effort"))
-        .or_else(|| obj.get("reasoning").and_then(|value| value.get("effort")))
-        .or_else(|| obj.get("effort"))
-        .and_then(Value::as_str)
-        .map(str::to_string)
-}
-
 fn normalize_openrouter_web_search_tools(obj: &mut serde_json::Map<String, Value>) -> usize {
     let mut rewritten = 0;
     if let Some(tools) = obj.get_mut("tools").and_then(Value::as_array_mut) {
@@ -610,6 +744,7 @@ fn normalize_openrouter_web_search_tools(obj: &mut serde_json::Map<String, Value
     rewritten
 }
 
+#[cfg(test)]
 fn bridge_openrouter_web_search_request(
     body: &[u8],
     requested_stream: bool,
@@ -646,6 +781,7 @@ fn bridge_openrouter_web_search_request(
     (rewritten, rewritten_tools)
 }
 
+#[cfg(test)]
 fn normalize_message_roles(json: &mut Value, policy: &PayloadNormalization) {
     let Some(messages) = json.get_mut("messages").and_then(Value::as_array_mut) else {
         return;
@@ -659,6 +795,7 @@ fn normalize_message_roles(json: &mut Value, policy: &PayloadNormalization) {
     }
 }
 
+#[cfg(test)]
 fn normalize_tool_definitions(json: &mut Value, defaults: &ToolDefaults) {
     let Some(tools) = json.get_mut("tools").and_then(Value::as_array_mut) else {
         return;
@@ -1459,6 +1596,7 @@ fn next_sse_event_end(buffer: &[u8]) -> Option<usize> {
     }
 }
 
+#[cfg(test)]
 fn body_requests_stream(body: impl AsRef<[u8]>) -> bool {
     serde_json::from_slice::<Value>(body.as_ref())
         .ok()
@@ -1470,17 +1608,13 @@ fn dry_run_response(
     route: &ResolvedRoute,
     backend: &BackendConfig,
     uri: &Uri,
-    original_body: &Bytes,
-    outgoing_body: &[u8],
+    prepared: &prepare::Prepared,
 ) -> Result<Response> {
     let target = route.target.as_str();
-    let original_model = model_from_body(original_body).unwrap_or_else(|| "-".to_string());
-    let outgoing_model = model_from_body(outgoing_body).unwrap_or_else(|| "-".to_string());
-    let outgoing_json = serde_json::from_slice::<Value>(outgoing_body).unwrap_or(Value::Null);
-    let outgoing_fields = outgoing_json
-        .as_object()
-        .map(|object| object.keys().cloned().collect::<Vec<_>>())
-        .unwrap_or_default();
+    let original_model = &prepared.original_model;
+    let outgoing_model = &route.model;
+    let outgoing_json = &prepared.outgoing_metadata;
+    let outgoing_fields = &prepared.outgoing_fields;
     let target_name = target;
     let payload = serde_json::json!({
         "rule_id": route.rule_id,
@@ -1538,35 +1672,6 @@ fn should_forward_response_header(name: &HeaderName) -> bool {
     !is_hop_by_hop_response_header(name) && !name.as_str().starts_with("access-control-")
 }
 
-fn log_route(
-    rule_id: &str,
-    target: &str,
-    word_gateway: bool,
-    method: &Method,
-    uri: &Uri,
-    body: &Bytes,
-    outgoing_body: &[u8],
-) {
-    let model = model_from_body(body).unwrap_or_else(|| "-".to_string());
-    let outgoing_model = model_from_body(outgoing_body).unwrap_or_else(|| "-".to_string());
-    let outgoing_provider = serde_json::from_slice::<Value>(outgoing_body)
-        .ok()
-        .and_then(|json| {
-            json.get("provider")
-                .and_then(|provider| provider.get("only"))
-                .and_then(Value::as_array)
-                .and_then(|providers| providers.first())
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        })
-        .unwrap_or_else(|| "-".to_string());
-    let flags = body_flags(body);
-    let target_name = target;
-    eprintln!(
-        "{method} {uri} rule={rule_id} word={word_gateway} model={model} outgoing={outgoing_model} provider={outgoing_provider} {flags} -> {target_name}"
-    );
-}
-
 fn log_upstream_response(
     target: &str,
     backend: &BackendConfig,
@@ -1610,59 +1715,99 @@ fn log_upstream_response(
     );
 }
 
-fn body_flags(body: impl AsRef<[u8]>) -> String {
-    let Ok(json) = serde_json::from_slice::<Value>(body.as_ref()) else {
-        return "json=false".to_string();
-    };
-    let stream = json.get("stream").and_then(Value::as_bool).unwrap_or(false);
-    let speed = json.get("speed").and_then(Value::as_str).unwrap_or("-");
-    let tools = json
-        .get("tools")
-        .and_then(Value::as_array)
-        .map_or(0, Vec::len);
-    let messages = json
-        .get("messages")
-        .and_then(Value::as_array)
-        .map_or(0, Vec::len);
-    let roles = json
-        .get("messages")
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .map(|item| item.get("role").and_then(Value::as_str).unwrap_or("-"))
-                .collect::<Vec<_>>()
-                .join(",")
-        })
-        .unwrap_or_else(|| "-".to_string());
-    let has_thinking = json.get("thinking").is_some();
-    let effort = json
-        .as_object()
-        .and_then(configured_effort)
-        .unwrap_or_else(|| "-".to_string());
-    let has_system = json.get("system").is_some();
-    let max_tokens = json
-        .get("max_tokens")
-        .and_then(Value::as_u64)
-        .map_or("-".to_string(), |value| value.to_string());
-    format!(
-        "stream={stream} speed={speed} tools={tools} messages={messages} roles={roles} thinking={has_thinking} effort={effort} system={has_system} max_tokens={max_tokens}"
-    )
-}
-
-fn model_from_body(body: impl AsRef<[u8]>) -> Option<String> {
-    serde_json::from_slice::<Value>(body.as_ref())
-        .ok()
-        .and_then(|json| {
-            json.get("model")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn verifies_file_backed_processing_against_request_fixture() {
+        let Some(path) = env::var_os("ROUTER_TEST_REQUEST") else {
+            return;
+        };
+        let config_path =
+            PathBuf::from(env::var_os("ROUTER_TEST_CONFIG").expect("ROUTER_TEST_CONFIG"));
+        let config = load_router_runtime_config(&config_path).unwrap();
+        let server = config.runtime.server.as_ref().unwrap();
+        fs::create_dir_all(&server.body_processing.spool_directory).unwrap();
+        let original: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        for case in &config.validation_cases {
+            let mut request = original.clone();
+            request["model"] = Value::String(case.model.clone());
+            if let Some(speed) = &case.speed {
+                request["speed"] = Value::String(speed.clone());
+            }
+            if let Some(content) = &case.last_user_content {
+                request["messages"]
+                    .as_array_mut()
+                    .expect("request messages")
+                    .push(serde_json::json!({"role": "user", "content": content}));
+            }
+            let headers = case
+                .headers
+                .iter()
+                .map(|(name, value)| (name.parse::<HeaderName>().unwrap(), value.parse().unwrap()))
+                .collect::<HeaderMap>();
+            let route = config
+                .resolve(
+                    &case.context,
+                    &headers,
+                    &request,
+                    case.settings_fast_mode,
+                    case.settings_model.as_deref(),
+                )
+                .unwrap();
+            let compatibility = config
+                .runtime
+                .clients
+                .iter()
+                .find(|client| client.id == case.context)
+                .unwrap()
+                .word_gateway;
+            let bytes = serde_json::to_vec(&request).unwrap();
+            let expected = apply_resolved_route(&bytes, &route, compatibility, &config).unwrap();
+            let expected = if let Some(policy) = &config.runtime.backends[&route.target].web_search
+            {
+                bridge_openrouter_web_search_request(
+                    &expected,
+                    body_requests_stream(&bytes),
+                    policy,
+                )
+                .0
+            } else {
+                expected
+            };
+            let input = body::JsonBody::receive(
+                Body::from(bytes),
+                &server.body_processing,
+                server.max_request_bytes,
+            )
+            .await
+            .unwrap();
+            let settings = ClientSettings {
+                fast_mode: case.settings_fast_mode,
+                model: case.settings_model.clone(),
+            };
+            let prepared = prepare::prepare(
+                input,
+                &config,
+                &case.context,
+                &headers,
+                &settings,
+                compatibility,
+                Protocol::Messages,
+            )
+            .unwrap();
+            assert_eq!(prepared.route.rule_id, route.rule_id, "{}", case.name);
+            let actual: Value =
+                serde_json::from_slice(&prepared.body.bytes_for_verification().unwrap()).unwrap();
+            let expected: Value = serde_json::from_slice(&expected).unwrap();
+            assert!(
+                actual == expected,
+                "request transformation mismatch: {}",
+                case.name
+            );
+        }
+    }
 
     #[test]
     fn live_router_config_is_valid() {

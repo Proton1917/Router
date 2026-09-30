@@ -258,6 +258,12 @@ pub struct CorsPolicy {
 
 impl RuntimeConfig {
     pub fn resolve_paths(&mut self, directory: &std::path::Path) {
+        if let Some(server) = &mut self.server
+            && !server.body_processing.spool_directory.is_absolute()
+        {
+            server.body_processing.spool_directory =
+                directory.join(&server.body_processing.spool_directory);
+        }
         let resolve = |value: &mut String| {
             if !std::path::Path::new(value).is_absolute() {
                 *value = directory.join(&*value).to_string_lossy().into_owned();

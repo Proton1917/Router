@@ -9,6 +9,12 @@
       "request_timeout_ms": 600000,
       "dry_run_header": "x-router-dry-run",
       "dry_run_values": ["1", "true"],
+      "body_processing": {
+        "spool_directory": "../.work/spool",
+        "io_buffer_bytes": 65536,
+        "metadata_limit_bytes": 4194304,
+        "max_concurrent_requests": 8
+      },
       "endpoints": {
         "/v1/messages": "messages",
         "/v1/responses": "responses",
