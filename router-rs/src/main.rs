@@ -37,6 +37,7 @@ struct AppState {
     runtime_routing_config: Arc<PathBuf>,
     server: Arc<ServerConfig>,
     processing: Arc<tokio::sync::Semaphore>,
+    web_url: Option<String>,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -83,6 +84,13 @@ async fn main() -> Result<()> {
             fs::Permissions::from_mode(0o700),
         )?;
     }
+    let (stop, receiver) = tokio::sync::watch::channel(false);
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let web = if config.management.is_some() {
+        Some(control::bind(&config_path, receiver.clone()).await?)
+    } else {
+        None
+    };
     let state = AppState {
         client: Client::builder()
             .no_gzip()
@@ -98,6 +106,10 @@ async fn main() -> Result<()> {
             server.body_processing.max_concurrent_requests,
         )),
         server: Arc::new(server),
+        web_url: config
+            .management
+            .as_ref()
+            .map(|manager| format!("http://{}", manager.listen)),
     };
 
     let app = Router::new()
@@ -106,15 +118,48 @@ async fn main() -> Result<()> {
         .with_state(state);
 
     eprintln!("router listening on http://{addr}");
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
-    Ok(())
+    let services = async {
+        let gateway =
+            axum::serve(listener, app).with_graceful_shutdown(shutdown_requested(receiver.clone()));
+        if let Some((listener, app)) = web {
+            let management =
+                axum::serve(listener, app).with_graceful_shutdown(shutdown_requested(receiver));
+            tokio::try_join!(async { gateway.await }, async { management.await })?;
+        } else {
+            gateway.await?;
+        }
+        Ok::<(), anyhow::Error>(())
+    };
+    tokio::pin!(services);
+    tokio::select! {
+        result = &mut services => result,
+        result = shutdown_signal() => {
+            result?;
+            stop.send(true).context("无法通知服务停止")?;
+            services.await
+        }
+    }
 }
 
-async fn shutdown_signal() {
-    let _ = tokio::signal::ctrl_c().await;
+async fn shutdown_requested(mut receiver: tokio::sync::watch::Receiver<bool>) {
+    if !*receiver.borrow() {
+        let _ = receiver.changed().await;
+    }
+}
+
+async fn shutdown_signal() -> Result<()> {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result?,
+            _ = terminate.recv() => {},
+        }
+    }
+    #[cfg(not(unix))]
+    tokio::signal::ctrl_c().await?;
+    Ok(())
 }
 
 async fn health(
@@ -122,7 +167,7 @@ async fn health(
     Query(query): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
     if query.get("format").is_some_and(|value| value == "json") {
-        return axum::Json(serde_json::json!({"service":"router","version":env!("CARGO_PKG_VERSION"),"config_id":blake3::hash(state.runtime_routing_config.to_string_lossy().as_bytes()).to_hex().to_string()})).into_response();
+        return axum::Json(serde_json::json!({"service":"router","version":env!("CARGO_PKG_VERSION"),"pid":std::process::id(),"web_url":state.web_url,"config_id":blake3::hash(state.runtime_routing_config.to_string_lossy().as_bytes()).to_hex().to_string()})).into_response();
     }
     "ok".into_response()
 }

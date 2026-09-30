@@ -1,20 +1,26 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { fetchEventSource } from '@microsoft/fetch-event-source';
 import './style.css';
+import './desktop.css';
 import { IntegrationWorkspace, IntegrationEditor } from './integrations.jsx';
 
 const copy = value => structuredClone(value);
 const pretty = value => JSON.stringify(value, null, 2);
 const clean = value => Object.fromEntries(Object.entries(value).filter(([,v]) => v !== undefined));
-const tokenFromUrl = new URLSearchParams(location.hash.slice(1)).get('token');
+const launchParameters = new URLSearchParams(location.hash.slice(1));
+if (launchParameters.get('desktop') === '1') sessionStorage.setItem('router-desktop', '1');
+const desktop = sessionStorage.getItem('router-desktop') === '1';
+if (desktop) document.documentElement.dataset.desktop = 'true';
+const tokenFromUrl = launchParameters.get('token');
 if (tokenFromUrl) { sessionStorage.setItem('router-token', tokenFromUrl); history.replaceState(null, '', location.pathname); }
 
 async function api(path, body) {
   const response = await fetch(`/api/${path}`, { method: body === undefined ? 'GET' : 'POST', headers: { Authorization: `Bearer ${sessionStorage.getItem('router-token') || ''}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body) });
-  if (response.status === 401) throw new Error('请运行 router web，从授权入口打开管理界面。');
+  if (response.status === 401) throw Object.assign(new Error('请运行 router web，从授权入口打开管理界面。'), { status: response.status });
   const text = await response.text();
   const data = text ? JSON.parse(text) : {};
-  if (!response.ok) throw new Error(data.error || `请求失败（HTTP ${response.status}）`);
+  if (!response.ok) throw Object.assign(new Error(data.error || `请求失败（HTTP ${response.status}）`), { status: response.status });
   return data;
 }
 
@@ -79,13 +85,73 @@ function App() {
   const [notice, setNotice] = useState(null);
   const [fatal, setFatal] = useState('');
   const [busy, setBusy] = useState(false);
+  const [pendingConfig, setPendingConfig] = useState(null);
+  const latest = useRef({});
+  const restarting = useRef(false);
   const dirty = snapshot && draft && pretty(snapshot.config) !== pretty(draft);
+  latest.current = { snapshot, dirty, busy, editing: !!(editor || integrationEditor || preview || confirm) };
   const notify = (message, error = false) => setNotice({ message, error });
 
-  async function load() { const data = await api('state'); setSnapshot(data); setDraft(copy(data.config)); setStatus(data.status); setFatal(''); }
+  function acceptConfig(data) { setSnapshot(data); setDraft(copy(data.config)); setStatus(data.status); setFatal(''); setPendingConfig(null); }
+  async function load() { const data = await api('state'); acceptConfig(data); }
   useEffect(() => { load().catch(e => setFatal(e.message)); }, []);
   useEffect(() => { if (!notice) return; const id = setTimeout(() => setNotice(null), 7000); return () => clearTimeout(id); }, [notice]);
-  useEffect(() => { const id = setInterval(() => api('state').then(data => setStatus(data.status)).catch(error => setStatus(old => ({ ...old, control_error: error.message }))), 8000); return () => clearInterval(id); }, []);
+  useEffect(() => {
+    if (!snapshot) return;
+    const controller = new AbortController();
+    let shownError = false;
+    let updates = Promise.resolve();
+    fetchEventSource('/api/changes', {
+      signal: controller.signal,
+      openWhenHidden: true,
+      headers: { Authorization: `Bearer ${sessionStorage.getItem('router-token') || ''}` },
+      onopen(response) {
+        if (!response.ok) throw Object.assign(new Error(`自动更新请求失败（HTTP ${response.status}）`), { status: response.status });
+        if (!response.headers.get('content-type')?.startsWith('text/event-stream')) throw new Error('自动更新返回格式不正确。');
+        shownError = false;
+      },
+      onmessage(event) {
+        if (event.event !== 'configuration') return;
+        updates = updates.then(async () => {
+          const change = JSON.parse(event.data);
+          if (change.error) throw new Error(change.error);
+          if (change.revision === latest.current.snapshot?.revision || controller.signal.aborted) return;
+          const data = await api('state');
+          if (controller.signal.aborted) return;
+          if (latest.current.dirty || latest.current.editing || latest.current.busy) setPendingConfig(data);
+          else acceptConfig(data);
+        }).catch(error => { if (!(restarting.current && error instanceof TypeError)) notify(error.message, true); });
+      },
+      onclose() { throw new Error('自动更新暂时中断。'); },
+      onerror(error) {
+        if (error.status === 401 || error.status === 403) throw error;
+        if (!shownError && !restarting.current) { notify(`${error.message} 将重试自动更新。`, true); shownError = true; }
+        return 1000;
+      },
+    }).catch(error => { if (!controller.signal.aborted) notify(error.message, true); });
+    return () => controller.abort();
+  }, [!!snapshot]);
+  useEffect(() => {
+    if (!pendingConfig) return;
+    if (pendingConfig.revision === snapshot?.revision) setPendingConfig(null);
+    else if (!dirty && !editor && !integrationEditor && !preview && !confirm && !busy) acceptConfig(pendingConfig);
+  }, [pendingConfig, snapshot, dirty, editor, integrationEditor, preview, confirm, busy]);
+
+  async function restartService() {
+    restarting.current = true;
+    try {
+      const operation = await api('service/restart', {});
+      for (let attempt = 0; attempt < 50; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+        let data;
+        try { data = await api('state'); }
+        catch (error) { if (error instanceof TypeError || [502, 503].includes(error.status)) continue; throw error; }
+        if (data.status.restart_error) throw new Error(data.status.restart_error);
+        if (data.status.pid !== operation.pid) { setStatus(data.status); return; }
+      }
+      throw new Error('router 重启未完成，请检查配置的重启命令。');
+    } finally { restarting.current = false; }
+  }
 
   async function task(action) { setBusy(true); setNotice(null); try { return await action(); } catch (e) { notify(e.message, true); } finally { setBusy(false); } }
   function mutate(callback) { setDraft(old => { const next = copy(old); callback(next); return next; }); }
@@ -145,12 +211,12 @@ function App() {
       const data = await api('apply', { revision: snapshot.revision, config: preview.config });
       setSnapshot({ ...snapshot, config: data.config, revision: data.revision }); setDraft(copy(data.config)); setPreview(null);
       if (commandsChanged) await api('commands/install', {});
-      if (serverChanged) await api('service/restart', {});
+      if (serverChanged) await restartService();
       const integrationChanges = pretty(snapshot.config.management.integrations) !== pretty(data.config.management.integrations) || pretty(snapshot.config.profiles) !== pretty(data.config.profiles);
       if (integrationChanges) {
         for (const id of Object.keys(data.config.management.integrations || {})) await api('integrations/action', { id, action: 'sync', revision: data.revision });
       }
-      notify(serverChanged ? '配置已应用，转发服务已重启。' : '配置已应用。后续请求使用当前配置。');
+      notify(serverChanged ? '配置已应用，router 已重启。' : '配置已应用。后续请求使用当前配置。');
       await load();
     });
   }
@@ -158,15 +224,16 @@ function App() {
   function editSettings() { setEditor({ kind: 'settings', id: 'server', value: copy(draft.runtime.server) }); }
   function moveRoute(id, delta) { mutate(config => { const index = config.routes.findIndex(row => row.id === id); const target = index + delta; if (target < 0 || target >= config.routes.length) return; const [route] = config.routes.splice(index, 1); config.routes.splice(target, 0, route); }); }
 
-  if (fatal || !draft) return <div className="loading"><div className="wordmark">router<span>.</span></div><h2>{fatal ? '需要授权入口' : '正在读取本机配置'}</h2><p>{fatal || '连接路由服务与管理配置…'}</p>{fatal && <code>router web</code>}</div>;
+  if (fatal || !draft) return <div className="loading"><div className="wordmark">router<span>.</span></div>{fatal && <><h2>无法读取配置</h2><p>{fatal}</p><Button onClick={() => load().catch(error => setFatal(error.message))}>重试读取</Button></>}</div>;
   const active = sections.find(([id]) => id === section);
   const metrics = [['启动命令', Object.keys(draft.management.commands).length], ['API 后端', Object.keys(draft.runtime.backends).length], ['模型配置', Object.keys(draft.profiles).length], ['路由规则', draft.routes.length]];
 
-  return <div className={`application ${status?.control_error ? 'connection-lost' : ''}`}>
-    <aside className="sidebar"><div className="wordmark">router<span>.</span></div><div className="workspace-tag"><span className="status-dot"/>本机工作空间</div><nav>{sections.map(([id, title, number]) => <button className={section === id ? 'active' : ''} key={id} onClick={() => { setSection(id); setQuery(''); }}><span className="nav-number">{number}</span>{title}<Icon name="arrow" size={14}/></button>)}</nav><div className="sidebar-footer"><div className="terminal-mark"><Icon name="terminal"/><code>router web</code></div><p>配置保存在本机<br/>命令与路由由你定义</p><span>v{status?.version}</span></div></aside>
+  return <div className="application">
+    {desktop && <div className="desktop-titlebar" data-tauri-drag-region><span>Router</span></div>}
+    <aside className="sidebar"><div className="wordmark">router<span>.</span></div><div className="workspace-tag"><span className="status-dot"/>本机工作空间</div><nav>{sections.map(([id, title, number]) => <button className={section === id ? 'active' : ''} key={id} onClick={() => { setSection(id); setQuery(''); }}><span className="nav-number">{number}</span>{title}<Icon name="arrow" size={14}/></button>)}</nav><div className="sidebar-footer"><div className="terminal-mark"><Icon name="terminal"/><code>{desktop ? 'Router Desktop' : 'router web'}</code></div><p>配置保存在本机<br/>命令与路由由你定义</p><span>v{status?.version}</span></div></aside>
     <main>
-      {status?.control_error && <div className="control-error" role="alert">管理连接中断：{status.control_error}</div>}
-      <header className="topbar"><div className="breadcrumb">工作空间 <span>/</span> {active[1]}</div><div className="topbar-right"><span className={`status-pill ${status?.gateway_online ? '' : 'offline'}`}><i/>{status?.gateway_online ? '转发服务在线' : '转发服务离线'}</span><code className="gateway-address">{status?.gateway_url}</code><button className="icon-button" aria-label="刷新配置" onClick={() => dirty ? setConfirm({ title: '重新读取配置', message: '当前草稿尚未应用。重新读取会放弃这些草稿修改。', action: () => task(async () => { await load(); setConfirm(null); }) }) : task(load)}><Icon name="refresh"/></button></div></header>
+      {pendingConfig && pendingConfig.revision !== snapshot.revision && <div className="config-update" role="status">配置有更新。当前编辑已保留，完成编辑后可刷新读取。</div>}
+      <header className="topbar"><div className="breadcrumb">工作空间 <span>/</span> {active[1]}</div><div className="topbar-right"><span className="workspace-label">本机配置</span><button className="icon-button" aria-label="刷新配置" onClick={() => dirty ? setConfirm({ title: '重新读取配置', message: '当前草稿尚未应用。重新读取会放弃这些草稿修改。', action: () => task(async () => { await load(); setConfirm(null); }) }) : task(load)}><Icon name="refresh"/></button></div></header>
       <div className="page-content"><div className="page-heading"><div><div className="eyebrow">LOCAL ROUTING / {active[2]}</div><h1>{active[1]}</h1><p>{descriptions[section]}</p></div><div className="heading-actions">{section === 'commands' && <Button disabled={busy} onClick={() => task(async () => { const result = await api('commands/install', {}); notify(`已同步 ${result.installed.length} 个终端命令。`); })}><Icon name="terminal"/>同步终端入口</Button>}{section === 'settings' ? <Button primary onClick={editSettings}>编辑服务参数</Button> : section !== 'integrations' && <Button primary onClick={add}><Icon name="plus"/>新增{active[1].replace('启动','').replace('API ','').replace('配置','')}</Button>}</div></div>
         {section === 'integrations' && <IntegrationWorkspace config={draft} revision={snapshot.revision} dirty={dirty} api={api} ui={{Button,Field,Modal}} onEdit={setIntegrationEditor} onCommand={name => setEditor({kind:'commands',id:name,value:copy(draft.management.commands[name])})}/>}
         {section !== 'integrations' && <div className="summary-strip">{metrics.map(([title, count]) => <div key={title}><strong>{count.toString().padStart(2, '0')}</strong><span>{title}</span></div>)}<div className="summary-note"><span className="mini-label">配置状态</span><span className={dirty ? 'text-amber' : 'text-green'}>{dirty ? '有未应用的修改' : '与本机文件一致'}</span></div></div>}
@@ -176,7 +243,7 @@ function App() {
         {section === 'models' && <div className="table-panel"><table><thead><tr><th>模型配置</th><th>标准目标</th><th>Fast 目标</th><th>关联路由</th><th/></tr></thead><tbody>{rows.map(([id, value]) => <tr key={id}><td><strong>{label(id)}</strong><p className="cell-note mono">{id}</p></td><td><span className="mono">{value.standard.model || value.standard.model_template || '保留请求模型'}</span><p className="cell-note">{value.standard.target}{value.standard.provider && ` · ${value.standard.provider}`}</p></td><td><span className="mono">{value.fast?.model || (value.fast ? '保留请求模型' : '沿用标准目标')}</span><p className="cell-note">{value.fast?.target || '—'}</p></td><td>{draft.routes.filter(route => route.profile === id).length} 条</td><td className="row-actions"><button onClick={() => setEditor({ kind: section, id, value: copy(value) })}>编辑</button><button className="delete-link" onClick={() => remove(section, id)}>删除</button></td></tr>)}</tbody></table>{!rows.length && <Empty text="为 API 后端定义可调用的模型配置。" onAdd={add}/>}</div>}
         {section === 'routes' && <div className="table-panel"><table><thead><tr><th>顺序与规则</th><th>匹配条件</th><th>模型配置</th><th/></tr></thead><tbody>{rows.map(([id, value]) => { const managed = draft.management.generated_routes?.includes(id); const match = value.match; return <tr key={id}><td><span className="route-order">{String(draft.routes.findIndex(row => row.id === id) + 1).padStart(2, '0')}</span><strong className="mono">{id}</strong>{managed && <p className="cell-note">由命令配置管理</p>}</td><td><div className="chips">{match.contexts?.map(item => <span key={`c${item}`}>{item}</span>)}{match.models?.map(item => <span className="mono" key={item}>{item}</span>)}{match.headers?.map(item => <span key={item.name}>{item.name}</span>)}{!Object.keys(match).length && <span className="amber-chip">默认路由</span>}{(match.model_prefixes?.length || match.model_contains?.length || match.last_user_contains_all?.length) > 0 && <span>内容与名称条件</span>}</div></td><td>{label(value.profile)}</td><td className="row-actions"><button aria-label={`上移 ${id}`} onClick={() => moveRoute(id, -1)} disabled={managed}>↑</button><button aria-label={`下移 ${id}`} onClick={() => moveRoute(id, 1)} disabled={managed}>↓</button><button disabled={managed} onClick={() => setEditor({ kind: section, id, value: copy(value) })}>编辑</button><button disabled={managed} className="delete-link" onClick={() => remove(section, id)}>删除</button></td></tr>; })}</tbody></table></div>}
         {section === 'templates' && <div className="backend-grid">{rows.map(([id, value]) => <article className="backend-card template-card" key={id}><header><div className="backend-icon"><Icon name="terminal"/></div><span className="subtle-badge">{value.deferred ? '启动器集成' : '直接启动'}</span></header><h3>{value.label || id}</h3><p className="template-description">{value.description || '自定义客户端启动方式'}</p><code className="backend-url">{value.program}</code><div className="backend-detail"><span>使用此方式的命令</span><strong>{Object.values(draft.management.commands).filter(command => command.template === id).length}</strong></div><footer><Button onClick={() => setEditor({ kind: section, id, value: copy(value) })}>编辑启动方式</Button><button className="delete-link" onClick={() => remove(section, id)}>删除</button></footer></article>)}</div>}
-        {section === 'settings' && <><div className="settings-grid"><article className="settings-card"><div className="eyebrow">NETWORK</div><h3>转发服务</h3><dl><dt>监听地址</dt><dd>{draft.runtime.server.listen}</dd><dt>连接超时</dt><dd>{draft.runtime.server.connect_timeout_ms / 1000} 秒</dd><dt>请求超时</dt><dd>{draft.runtime.server.request_timeout_ms / 1000} 秒</dd><dt>请求大小上限</dt><dd>{draft.runtime.server.max_request_bytes / 1048576} MiB</dd></dl><Button onClick={() => task(async () => { await api('service/restart', {}); notify('转发服务已重启。'); await load(); })} disabled={dirty || busy}><Icon name="refresh"/>重启服务</Button></article><article className="settings-card"><div className="eyebrow">BODY PROCESSING</div><h3>正文与资源</h3><dl><dt>读写缓冲</dt><dd>{draft.runtime.server.body_processing.io_buffer_bytes / 1024} KiB</dd><dt>正文处理并发数</dt><dd>{draft.runtime.server.body_processing.max_concurrent_requests}</dd><dt>控制字段读取上限</dt><dd>{draft.runtime.server.body_processing.metadata_limit_bytes / 1048576} MiB</dd><dt>暂存目录</dt><dd className="wrap-path">{draft.runtime.server.body_processing.spool_directory}</dd></dl></article></div><div className="config-location"><div><span className="eyebrow">CONFIGURATION</span><p className="mono">{status?.config_path}</p><small>凭据目录：{draft.management.credential_directory}</small></div><Button onClick={() => setEditor({ kind: 'raw', id: 'config', value: copy(draft) })}>编辑完整配置</Button></div></>}
+        {section === 'settings' && <><div className="settings-grid"><article className="settings-card"><div className="eyebrow">NETWORK</div><h3>router 服务</h3><dl><dt>监听地址</dt><dd>{draft.runtime.server.listen}</dd><dt>连接超时</dt><dd>{draft.runtime.server.connect_timeout_ms / 1000} 秒</dd><dt>请求超时</dt><dd>{draft.runtime.server.request_timeout_ms / 1000} 秒</dd><dt>请求大小上限</dt><dd>{draft.runtime.server.max_request_bytes / 1048576} MiB</dd></dl><Button onClick={() => task(async () => { await restartService(); notify('router 已重启。'); await load(); })} disabled={dirty || busy}><Icon name="refresh"/>重启服务</Button></article><article className="settings-card"><div className="eyebrow">BODY PROCESSING</div><h3>正文与资源</h3><dl><dt>读写缓冲</dt><dd>{draft.runtime.server.body_processing.io_buffer_bytes / 1024} KiB</dd><dt>正文处理并发数</dt><dd>{draft.runtime.server.body_processing.max_concurrent_requests}</dd><dt>控制字段读取上限</dt><dd>{draft.runtime.server.body_processing.metadata_limit_bytes / 1048576} MiB</dd><dt>暂存目录</dt><dd className="wrap-path">{draft.runtime.server.body_processing.spool_directory}</dd></dl></article></div><div className="config-location"><div><span className="eyebrow">CONFIGURATION</span><p className="mono">{status?.config_path}</p><small>凭据目录：{draft.management.credential_directory}</small></div><Button onClick={() => setEditor({ kind: 'raw', id: 'config', value: copy(draft) })}>编辑完整配置</Button></div></>}
         <div className={`savebar ${dirty ? 'is-dirty' : ''}`}><div><span className={`status-dot ${dirty ? 'amber' : ''}`}/><strong>{dirty ? '草稿尚未应用' : '配置已同步'}</strong><span>{dirty ? '应用前会检查引用关系和路由验证用例。' : `${draft.validation_cases.length} 个路由验证用例`}</span></div><div>{dirty && <Button onClick={() => setConfirm({ title: '放弃草稿修改', message: '恢复到最近读取的本机配置。', action: () => { setDraft(copy(snapshot.config)); setConfirm(null); } })}>放弃草稿</Button>}<Button primary disabled={!dirty || busy} onClick={prepareApply}>{busy ? '正在处理…' : '应用修改'}<Icon name="arrow" size={15}/></Button></div></div>
       </div>
     </main>

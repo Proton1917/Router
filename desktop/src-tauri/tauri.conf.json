@@ -1,0 +1,38 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Router",
+  "version": "0.2.0",
+  "identifier": "app.router.console",
+  "build": {
+    "beforeBuildCommand": "node prepare.mjs",
+    "beforeDevCommand": "node prepare.mjs",
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src ipc: http://ipc.localhost",
+      "capabilities": [{
+        "identifier": "setup",
+        "windows": ["setup"],
+        "permissions": ["allow-setup-info", "allow-choose-config", "allow-create-config", "allow-open-saved", "core:window:allow-start-dragging"]
+      }, {
+        "identifier": "console-window",
+        "windows": ["console-*"],
+        "remote": {"urls": ["http://127.0.0.1:*", "http://[\\:\\:1]:*", "http://localhost:*"]},
+        "permissions": ["core:window:allow-start-dragging"]
+      }]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "category": "DeveloperTool",
+    "shortDescription": "配置本地模型路由、API 与客户端命令",
+    "resources": {"resources/": "resources/"},
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns"],
+    "macOS": {"minimumSystemVersion": "14.0", "signingIdentity": "-"}
+  }
+}

@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    convert::Infallible,
     fs,
     io::Write,
     net::SocketAddr,
@@ -13,9 +14,10 @@ use axum::{
     extract::{DefaultBodyLimit, Request, State},
     http::{HeaderMap, StatusCode},
     middleware::{self, Next},
-    response::{IntoResponse, Response},
+    response::{IntoResponse, Response, Sse, sse::Event},
     routing::{get, post},
 };
+use notify::Watcher;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::Mutex;
@@ -639,7 +641,10 @@ struct ControlState {
     token: Arc<String>,
     authority: String,
     lock: Arc<Mutex<()>>,
-    shutdown: Arc<tokio::sync::Notify>,
+    restart_error: Arc<Mutex<Option<String>>>,
+    changes: tokio::sync::watch::Receiver<Value>,
+    shutdown: tokio::sync::watch::Receiver<bool>,
+    _watcher: Arc<std::sync::Mutex<notify::RecommendedWatcher>>,
 }
 
 struct ApiError(anyhow::Error);
@@ -688,20 +693,72 @@ async fn protect(State(state): State<ControlState>, request: Request, next: Next
 
 async fn state(State(state): State<ControlState>) -> Result<Json<Value>, ApiError> {
     let value = load_value(&state.path)?;
-    let server = crate::load_router_runtime_config(&state.path)?
-        .runtime
-        .server
-        .context("缺少 server")?;
-    let health = format!("{}{}", gateway_url(&value)?, server.health_path);
-    let online = reqwest::Client::new()
-        .get(health)
-        .timeout(std::time::Duration::from_secs(2))
-        .send()
-        .await
-        .is_ok_and(|response| response.status().is_success());
+    crate::load_router_runtime_config(&state.path)?;
+    let restart_error = state.restart_error.lock().await.clone();
     Ok(Json(
-        json!({"config":value,"revision":revision(&value)?,"status":{"gateway_online":online,"gateway_url":gateway_url(&value)?,"config_path":state.path.as_ref(),"version":env!("CARGO_PKG_VERSION")}}),
+        json!({"config":value,"revision":revision(&value)?,"status":{"pid":std::process::id(),"restart_error":restart_error,"gateway_url":gateway_url(&value)?,"config_path":state.path.as_ref(),"version":env!("CARGO_PKG_VERSION")}}),
     ))
+}
+
+async fn changes(
+    State(state): State<ControlState>,
+) -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
+    let stream = futures_util::stream::unfold(
+        (state.changes, state.shutdown, true),
+        |(mut updates, mut shutdown, initial)| async move {
+            if *shutdown.borrow() {
+                return None;
+            }
+            if !initial {
+                tokio::select! {
+                    result = updates.changed() => {
+                        if result.is_err() { return None; }
+                    }
+                    _ = shutdown.changed() => return None,
+                }
+            }
+            let value = updates.borrow_and_update().clone();
+            let event = Event::default()
+                .event("configuration")
+                .data(value.to_string());
+            Some((Ok(event), (updates, shutdown, false)))
+        },
+    );
+    Sse::new(stream)
+}
+
+fn watch_configuration(
+    path: &Path,
+    value: &Value,
+) -> Result<(
+    notify::RecommendedWatcher,
+    tokio::sync::watch::Receiver<Value>,
+)> {
+    let (publisher, receiver) = tokio::sync::watch::channel(json!({"revision":revision(value)?}));
+    let watched = path.to_owned();
+    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+        let update = match event {
+            Ok(event) => {
+                if event.kind.is_access() || !event.paths.iter().any(|path| path == &watched) {
+                    return;
+                }
+                match load_value(&watched).and_then(|value| revision(&value)) {
+                    Ok(revision) => json!({"revision":revision}),
+                    Err(error) => json!({"error":format!("配置更新读取失败：{error:#}")}),
+                }
+            }
+            Err(error) => json!({"error":format!("配置文件监视失败：{error}")}),
+        };
+        let changed = *publisher.borrow() != update;
+        if changed {
+            publisher.send_replace(update);
+        }
+    })?;
+    watcher.watch(
+        path.parent().context("配置文件目录不存在")?,
+        notify::RecursiveMode::NonRecursive,
+    )?;
+    Ok((watcher, receiver))
 }
 
 #[derive(Deserialize)]
@@ -767,8 +824,38 @@ async fn install(
 }
 
 async fn restart(State(state): State<ControlState>) -> Result<Json<Value>, ApiError> {
-    crate::cli::restart_gateway(&state.path).await?;
-    Ok(Json(json!({"restarted":true})))
+    let value = load_value(&state.path)?;
+    let manager = management(&value)?;
+    let spec = manager.service_restart.context("未配置服务重启命令")?;
+    let context = json!({"config_path":state.path.as_ref(),"executable":std::env::current_exe()?});
+    let mut command = tokio::process::Command::new(render(&spec.program, &context)?);
+    for arg in &spec.args {
+        command.arg(render(arg, &context)?);
+    }
+    let directory = resolve_path(&state.path, &manager.log_directory);
+    fs::create_dir_all(&directory)?;
+    let output = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(directory.join("router.log"))?;
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(output.try_clone()?)
+        .stderr(output);
+    #[cfg(unix)]
+    command.process_group(0);
+    *state.restart_error.lock().await = None;
+    tokio::spawn(async move {
+        // 先返回操作响应，再启动重启命令。
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let error = match command.status().await {
+            Ok(status) if status.success() => None,
+            Ok(status) => Some(format!("重启命令执行失败：{status}")),
+            Err(error) => Some(format!("无法执行重启命令：{error}")),
+        };
+        *state.restart_error.lock().await = error;
+    });
+    Ok(Json(json!({"restarting":true,"pid":std::process::id()})))
 }
 
 #[derive(Deserialize)]
@@ -792,11 +879,6 @@ async fn integration_action(
     Ok(Json(
         crate::integrations::perform(&state.path, &request.id, &request.action).await?,
     ))
-}
-
-async fn stop_control(State(state): State<ControlState>) -> Json<Value> {
-    state.shutdown.notify_one();
-    Json(json!({"stopping":true}))
 }
 
 #[derive(Deserialize)]
@@ -876,19 +958,26 @@ async fn backend_probe(
     Ok(Json(json!({"status":status.as_u16(),"models":models})))
 }
 
-pub async fn serve(path: PathBuf) -> Result<()> {
-    let value = load_value(&path)?;
+pub async fn bind(
+    path: &Path,
+    shutdown: tokio::sync::watch::Receiver<bool>,
+) -> Result<(tokio::net::TcpListener, Router)> {
+    let value = load_value(path)?;
     let manager = management(&value)?;
-    let shutdown = Arc::new(tokio::sync::Notify::new());
+    let (watcher, changes_receiver) = watch_configuration(path, &value)?;
     let state_value = ControlState {
-        path: Arc::new(path.clone()),
-        token: Arc::new(token(&path, &manager)?),
+        path: Arc::new(path.to_owned()),
+        token: Arc::new(token(path, &manager)?),
         authority: manager.listen.to_string(),
         lock: Arc::new(Mutex::new(())),
-        shutdown: shutdown.clone(),
+        restart_error: Arc::new(Mutex::new(None)),
+        changes: changes_receiver,
+        shutdown,
+        _watcher: Arc::new(std::sync::Mutex::new(watcher)),
     };
     let api = Router::new()
         .route("/state", get(state))
+        .route("/changes", get(changes))
         .route("/preview", post(preview))
         .route("/apply", post(apply))
         .route("/credentials", post(credential))
@@ -897,14 +986,13 @@ pub async fn serve(path: PathBuf) -> Result<()> {
         .route("/backends/probe", post(backend_probe))
         .route("/integrations/action", post(integration_action))
         .route("/service/restart", post(restart))
-        .route("/stop", post(stop_control))
         .route(
             "/health",
-            get(|| async { Json(json!({"service":"router-control"})) }),
+            get(|| async { Json(json!({"service":"router","pid":std::process::id()})) }),
         )
         .route_layer(middleware::from_fn_with_state(state_value.clone(), protect))
         .with_state(state_value);
-    let assets = resolve_path(&path, &manager.assets_directory);
+    let assets = resolve_path(path, &manager.assets_directory);
     ensure!(
         assets.join("index.html").is_file(),
         "前端资源不存在: {}",
@@ -915,17 +1003,8 @@ pub async fn serve(path: PathBuf) -> Result<()> {
         .fallback_service(ServeDir::new(assets))
         .layer(DefaultBodyLimit::max(manager.max_request_bytes));
     let listener = tokio::net::TcpListener::bind(manager.listen).await?;
-    write_json(
-        &path.with_extension("web-state.json"),
-        &json!({"listen":manager.listen,"token_file":resolve_path(&path,&manager.token_file),"pid":std::process::id()}),
-    )?;
-    eprintln!("router web listening on http://{}", manager.listen);
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            tokio::select! { _ = crate::shutdown_signal() => {}, _ = shutdown.notified() => {} }
-        })
-        .await?;
-    Ok(())
+    eprintln!("router page available at http://{}", manager.listen);
+    Ok((listener, app))
 }
 
 pub fn browser_url(path: &Path) -> Result<String> {
@@ -935,8 +1014,4 @@ pub fn browser_url(path: &Path) -> Result<String> {
         manager.listen,
         token(path, &manager)?
     ))
-}
-
-pub fn control_token(path: &Path) -> Result<String> {
-    token(path, &management(&load_value(path)?)?)
 }

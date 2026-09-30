@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Router</title><link rel="stylesheet" href="setup.css"></head>
+<body><div class="titlebar" data-tauri-drag-region></div><main>
+  <div class="brand">router<span>DESKTOP</span></div>
+  <p class="eyebrow">本地模型路由控制台</p>
+  <h1>配置你的入口。</h1>
+  <p class="description">管理 API、模型与终端命令。配置保存在本机，转发服务在关闭窗口后继续运行。</p>
+  <div id="error" role="alert" hidden></div>
+  <button id="resume" class="primary" hidden>打开上次的配置</button>
+  <button id="choose">选择已有配置文件…</button>
+  <details id="new"><summary>创建新配置</summary>
+    <form id="create"><label>配置目录<input id="directory" required></label><label>终端入口目录<input id="launchers" required></label><div class="addresses"><label>转发监听地址<input id="gateway" required></label><label>控制台监听地址<input id="control" required></label></div>
+    <label class="checkbox"><input type="checkbox" id="shell" checked>自动配置 Zsh 终端入口</label>
+    <p class="hint">自动安装服务、网页资源与 router 命令。自动配置会向 ~/.zshrc 添加初始化语句，重新打开终端即可使用。API 凭据在控制台中添加，保存在所选目录的 credentials 文件夹。</p>
+    <button class="primary" type="submit">安装并打开控制台</button></form>
+  </details>
+  <p id="progress" role="status"></p>
+  <footer>Messages · Responses · 自定义路由</footer>
+</main><script src="setup.js"></script></body></html>

@@ -21,14 +21,12 @@ pub struct Arguments {
 pub enum RouterCommand {
     /// 启动转发服务
     Serve,
-    /// 启动管理界面与转发服务，并打开浏览器
+    /// 启动 router 并打开管理页面
     Web {
         #[arg(long)]
         no_open: bool,
         #[arg(long)]
         restart: bool,
-        #[arg(long, hide = true)]
-        foreground: bool,
     },
     /// 查看服务和配置状态
     Status,

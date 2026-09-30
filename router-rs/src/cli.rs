@@ -18,16 +18,12 @@ use crate::{
 pub async fn dispatch(path: &Path, command: RouterCommand) -> Result<()> {
     match command {
         RouterCommand::Serve => unreachable!("serve is handled by main"),
-        RouterCommand::Web {
-            no_open,
-            restart,
-            foreground,
-        } => {
-            ensure_gateway(path).await?;
-            if foreground {
-                return control::serve(path.to_owned()).await;
+        RouterCommand::Web { no_open, restart } => {
+            if restart {
+                restart_gateway(path).await?;
+            } else {
+                ensure_gateway(path).await?;
             }
-            ensure_control(path, restart).await?;
             if !no_open {
                 let manager = control::management(&control::load_value(path)?)?;
                 process(
@@ -249,6 +245,11 @@ async fn gateway_identity(client: &reqwest::Client, url: &str, path: &Path) -> R
             && value["config_id"].as_str() == Some(&expected),
         "此监听地址上的 router 使用了其他配置文件，请调整地址或停止该实例"
     );
+    let manager = control::management(&control::load_value(path)?)?;
+    ensure!(
+        value["web_url"].as_str() == Some(&format!("http://{}", manager.listen)),
+        "请重启 router 以应用当前网页设置"
+    );
     Ok(true)
 }
 
@@ -261,109 +262,6 @@ pub async fn restart_gateway(path: &Path) -> Result<()> {
         false,
     )?;
     ensure_gateway(path).await
-}
-
-async fn ensure_control(path: &Path, restart: bool) -> Result<()> {
-    let value = control::load_value(path)?;
-    let manager = control::management(&value)?;
-    let url = format!("http://{}/api/health", manager.listen);
-    let token = control::control_token(path)?;
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()?;
-    let registry_path = path.with_extension("web-state.json");
-    if registry_path.exists() {
-        let registry = control::load_value(&registry_path)?;
-        let address: std::net::SocketAddr = registry["listen"]
-            .as_str()
-            .context("管理服务状态缺少地址")?
-            .parse()?;
-        ensure!(
-            address.ip().is_loopback(),
-            "管理服务状态地址必须为 loopback"
-        );
-        let previous_token = fs::read_to_string(
-            registry["token_file"]
-                .as_str()
-                .context("管理服务状态缺少令牌文件")?,
-        )?;
-        let previous_url = format!("http://{address}");
-        if client
-            .get(format!("{previous_url}/api/health"))
-            .bearer_auth(previous_token.trim())
-            .send()
-            .await
-            .is_ok_and(|response| response.status().is_success())
-        {
-            if !restart && address == manager.listen && previous_token.trim() == token {
-                return Ok(());
-            }
-            client
-                .post(format!("{previous_url}/api/stop"))
-                .bearer_auth(previous_token.trim())
-                .send()
-                .await?
-                .error_for_status()?;
-            for _ in 0..50 {
-                if client
-                    .get(format!("{previous_url}/api/health"))
-                    .bearer_auth(previous_token.trim())
-                    .send()
-                    .await
-                    .is_err()
-                {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-        }
-    }
-    if client
-        .get(&url)
-        .bearer_auth(&token)
-        .send()
-        .await
-        .is_ok_and(|r| r.status().is_success())
-    {
-        ensure!(!restart, "现有管理服务没有重启状态记录，请先停止该进程");
-        return Ok(());
-    }
-    let logs = control::resolve_path(path, &manager.log_directory);
-    fs::create_dir_all(&logs)?;
-    let output = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(logs.join("control.log"))?;
-    let mut command = Command::new(std::env::current_exe()?);
-    command
-        .arg("--config")
-        .arg(path)
-        .args(["web", "--foreground", "--no-open"])
-        .stdin(Stdio::null())
-        .stdout(output.try_clone()?)
-        .stderr(output);
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    let mut child = command.spawn()?;
-    for _ in 0..50 {
-        if let Some(status) = child.try_wait()? {
-            bail!("管理服务启动失败: {status}，请查看 control.log");
-        }
-        if client
-            .get(&url)
-            .bearer_auth(&token)
-            .send()
-            .await
-            .is_ok_and(|r| r.status().is_success())
-        {
-            return Ok(());
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    bail!("管理服务启动后未通过健康检查")
 }
 
 fn commands(path: &Path, action: CommandAction) -> Result<()> {

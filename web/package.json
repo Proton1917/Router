@@ -4,6 +4,6 @@
   "version": "0.2.0",
   "type": "module",
   "scripts": {"dev": "vite --host 127.0.0.1", "build": "vite build"},
-  "dependencies": {"react": "19.3.0", "react-dom": "19.3.0"},
+  "dependencies": {"react": "19.3.0", "react-dom": "19.3.0", "@microsoft/fetch-event-source": "2.0.1"},
   "devDependencies": {"vite": "8.3.1", "@vitejs/plugin-react": "6.1.1"}
 }

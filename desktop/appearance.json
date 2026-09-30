@@ -1,0 +1,18 @@
+{
+  "setup": {
+    "label": "setup", "title": "Router · 配置", "width": 660, "height": 800,
+    "minWidth": 560, "minHeight": 600,
+    "titleBarStyle": "Overlay", "hiddenTitle": true,
+    "trafficLightPosition": {"x": 20, "y": 24},
+    "transparent": true, "backgroundColor": "#00000000", "theme": "Light",
+    "windowEffects": {"effects": ["liquidGlassRegular", "sidebar"], "radius": 22, "interactive": true}
+  },
+  "console": {
+    "label": "console", "title": "Router", "width": 1320, "height": 900,
+    "minWidth": 960, "minHeight": 680,
+    "titleBarStyle": "Overlay", "hiddenTitle": true,
+    "trafficLightPosition": {"x": 20, "y": 24},
+    "transparent": true, "backgroundColor": "#00000000", "theme": "Light",
+    "windowEffects": {"effects": ["liquidGlassRegular", "sidebar"], "radius": 22, "interactive": true}
+  }
+}
