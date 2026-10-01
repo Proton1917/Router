@@ -151,7 +151,9 @@ router config check
 
 新增命令在网页中填写名称、选择启动方式和模型后，应用修改会自动同步终端入口。模型的标准与 Fast 目标可通过“服务等级”选择上游标准、Priority 或 Flex 服务。启动方式的 `options` 可以声明选项名称、默认值和各选项对应的参数数组，网页自动生成下拉框；每个命令在自身 `options` 中保存所选值。例如 Codex 的启动服务等级通过该机制生成 `-c service_tier="fast"` 参数，运行时发送 `service_tier: "priority"`。
 
-`scripts/codex-api.zsh` 从后端读取 Codex 模型目录，并合并启动方式的默认服务等级、后端目录元数据和同模型、同后端 Fast 目标中的服务等级。启动方式的环境变量 `ROUTER_CODEX_DEFAULT_SERVICE_TIERS` 接受包含 `id`、`name`、`description` 的 JSON 对象数组；OpenRouter 入口可将 `priority` 声明为所有目录模型的默认 Fast 服务等级。该规则也适用于后续新增的目录模型。该脚本依赖 Zsh 与 jq，参数依次为 router 配置文件、临时目录、Codex 程序、provider 参数、`--` 和客户端参数。临时目录应位于仓库外；生成的目录文件在客户端退出时删除。API 客户端的会话内快捷命令由客户端自身决定。
+`scripts/codex-api.zsh` 从后端读取 Codex 模型目录，并合并启动方式的默认服务等级、后端目录元数据和同模型、同后端 Fast 目标中的服务等级。启动方式的环境变量 `ROUTER_CODEX_DEFAULT_SERVICE_TIERS` 接受包含 `id`、`name`、`description` 的 JSON 对象数组；OpenRouter 入口可将 `priority` 声明为所有目录模型的默认 Fast 服务等级。该规则也适用于后续新增的目录模型。该脚本依赖 Zsh（含 `zsh/system`）、jq 与 shasum，参数依次为 router 配置文件、目录保存位置、Codex 程序、provider 参数、`--` 和客户端参数。目录应位于仓库外；会话使用的临时文件在客户端退出时删除。API 客户端的会话内快捷命令由客户端自身决定。
+
+每个启动命令保存一份已校验的精简模型目录，默认有效期为 300 秒。启动方式的环境变量 `ROUTER_CODEX_CATALOG_CACHE_SECONDS` 可调整有效期，设为 `0` 时每次启动都重新获取。配置、provider 参数、Codex 版本或目录适配脚本变化会立即使缓存失效。并发启动通过文件锁协调更新；失效目录必须重新获取并通过校验，失败时停止启动。缓存文件权限为 `0600`，只保存精简目录和校验信息。
 
 `router run` 向启动程序提供 `ROUTER_COMMAND_NAME`。Codex 目录只保留该命令绑定的模型，以及带该命令标记的专属路由所引用的模型；名单来自配置，保留上游返回的能力信息。直接调用适配脚本时需设置同名环境变量。修改命令绑定或专属路由后，重新启动客户端即可读取新的模型列表。
 

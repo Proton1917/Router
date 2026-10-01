@@ -5,7 +5,7 @@ $routing[0] as $config
   then error("默认服务等级必须为包含 id 和 name 的对象数组") else . end
 | if (.models | type) != "array" then error("Codex 返回了无效的模型目录") else . end
 | if $pattern != "" and (any(.models[]; .slug | test($pattern)) | not)
-  then error("Codex 没有取得当前入口的后端模型目录，请检查目录刷新错误") else . end
+  then error("Codex 未返回当前后端的模型目录；远程获取失败时可能返回内置目录，即使命令退出状态为成功") else . end
 | ([ $entry.profile // empty ] + [
     $config.routes[]
     | select(any(.match.headers[]?;
