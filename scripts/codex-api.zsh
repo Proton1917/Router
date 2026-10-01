@@ -19,6 +19,7 @@ shift
 
 mkdir -p "$catalog_directory"
 chmod 700 "$catalog_directory"
+client_umask="$(umask)"
 umask 077
 catalog_source="$(mktemp "$catalog_directory/source.XXXXXXXX")"
 catalog_file=""
@@ -28,7 +29,7 @@ trap 'exit 143' TERM
 trap 'exit 129' HUP
 catalog_file="$(mktemp "$catalog_directory/catalog.XXXXXXXX")"
 
-client_version="$("$client_program" --version)"
+client_version="$(umask "$client_umask"; "$client_program" --version)"
 cache_id="$(printf '%s\0' "${routing_config:A}" "$command_name" | shasum -a 256)"
 cache_id="${cache_id%% *}"
 catalog_cache="$catalog_directory/cache.$cache_id.json"
@@ -58,7 +59,7 @@ fi
 if [[ "$cache_valid" == true ]]; then
   jq -e '.catalog' "$catalog_cache" > "$catalog_file"
 else
-  "$client_program" "${provider_args[@]}" debug models > "$catalog_source"
+  (umask "$client_umask"; "$client_program" "${provider_args[@]}" debug models) > "$catalog_source"
   # 校验命令绑定与真实目录元数据后，原子保存精简目录。
   if ! jq --slurpfile routing "$routing_config" --arg command "$command_name" \
     --argjson defaults "${ROUTER_CODEX_DEFAULT_SERVICE_TIERS:-[]}" \
@@ -77,4 +78,5 @@ zsystem flock -u "$cache_lock"
 [[ ! -f "$catalog_source" ]] || rm -- "$catalog_source"
 
 catalog_option="$(jq -nr --arg path "$catalog_file" '"model_catalog_json=" + ($path | tojson)')"
+umask "$client_umask"
 "$client_program" "${provider_args[@]}" -c "$catalog_option" "$@"
