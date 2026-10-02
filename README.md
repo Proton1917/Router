@@ -212,7 +212,7 @@ Rust 负责校验、路由生成、管理接口和有超时限制的适配程序
 
 Office 的 Router 入口通过加载项启动参数 `available_models` 同步模型 ID 与显示名称。保存并应用接入设置时，适配程序读取当前模型目录，为 Word、Excel 生成独立的自定义加载项清单。名称通过 URL fragment 传给官方插件页面；上游凭据由 router 管理。加载项清单变化时自动递增版本，已有任务窗格在重新加载后读取新名称。首次安装后，从 Office 的“加载项 → 开发人员加载项”选择配置中的入口名称。
 
-名称同步由 Office 接入项的 `settings.model_labels` 启用。该对象声明 `display_name`、`page_origin`、`page_paths`、`model_parameter`、`parameters` 和 `backup_directory`。`parameters` 支持 `{gateway_url}` 与 `{local_token}`，其中 `local_token` 必须是本机网关的非秘密占位值。每个 `settings.applications` 条目同时声明 `manifest_root`、`manifest_pattern`、`source_manifest_id`、`manifest_id`、`manifest_file`。源清单从已安装的官方插件缓存读取，目标清单使用独立 UUID；macOS 的目标目录为相应 Office 容器中的 `Data/Documents/wef/`。适配程序需要 Python 3、`lxml`、`jsonpointer` 和 `packaging`，通过 `adapter.program` 指定已安装这些依赖的 Python。
+名称同步由 Office 接入项的 `settings.model_labels` 启用。该对象声明 `display_name`、`page_origin`、`page_paths`、`model_parameter`、`parameters` 和 `backup_directory`。`parameters` 支持 `{gateway_url}` 与 `{local_token}`，其中 `local_token` 必须是本机网关的非秘密占位值。每个 `settings.applications` 条目同时声明 `manifest_root`、`manifest_pattern`、`source_manifest_id`、`manifest_id`、`manifest_file`。源清单保存在配置指定的模板目录中，首次配置时可从已安装的官方插件缓存复制。目标清单使用独立 UUID；macOS 的目标目录为相应 Office 容器中的 `Data/Documents/wef/`。适配程序需要 Python 3、`lxml`、`jsonpointer` 和 `packaging`，通过 `adapter.program` 指定已安装这些依赖的 Python。
 
 ## Mods 管理
 
