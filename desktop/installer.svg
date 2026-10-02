@@ -20,7 +20,7 @@
   <path d="M87 151H632" stroke="#fff" stroke-opacity=".85" stroke-width="1.4"/>
   <rect x="328" y="226" width="64" height="43" rx="21.5" fill="#fff" fill-opacity=".56" stroke="#fff" stroke-opacity=".86"/>
   <path d="M347 247.5H373M365 239.5L373 247.5L365 255.5" stroke="#50745b" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="51" cy="400" r="3" fill="#82a17c"/>
-  <text x="63" y="404" font-family="PingFang SC,Hiragino Sans GB,sans-serif" font-size="12" fill="#5a7361">安装后，从“应用程序”打开 Router。</text>
-  <text x="670" y="404" text-anchor="end" font-family="Helvetica Neue,sans-serif" font-size="10" fill="#7a8d7d">Apple Silicon · macOS 14+</text>
+  <circle cx="51" cy="378" r="3" fill="#82a17c"/>
+  <text x="63" y="382" font-family="PingFang SC,Hiragino Sans GB,sans-serif" font-size="12" fill="#5a7361">安装后，从“应用程序”打开 Router。</text>
+  <text x="670" y="382" text-anchor="end" font-family="Helvetica Neue,sans-serif" font-size="10" fill="#7a8d7d">Apple Silicon · macOS 14+</text>
 </svg>
