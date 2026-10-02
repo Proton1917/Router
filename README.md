@@ -208,7 +208,11 @@ Rust 负责校验、路由生成、管理接口和有超时限制的适配程序
 
 提供的适配程序支持活动 JSON 模型目录，以及 Office WebKit 中已有的插件接入存储。JSON 修改保留其他字段，Office 修改通过 SQLite 事务更新接入项，写入前在受保护目录保存备份。真实上游凭据仍由 router 单独读取，客户端使用本地占位令牌。Office 的首次安装或首次加载由宿主应用完成；同步后重新打开客户端或插件载入地址和目录，路由调整对后续请求生效。连接检查验证网关、HTTPS 证书及目录，不代表上游账号已获得所有模型权限。
 
-应用配置时，仅同步发生修改的客户端接入项。模型和路由配置由后续请求直接读取。Office 接入页分别报告各宿主应用的配置状态；macOS 拒绝读取应用容器时会显示权限提示，需为实际运行后台服务的程序配置系统访问权限后才能自动同步。
+应用配置时，同步发生修改的客户端接入项；启用 Office 名称同步后，关联模型的默认名称或后端名称变化也会更新对应加载项清单。模型和路由配置由后续请求直接读取。Office 接入页分别报告各宿主应用的配置状态；macOS 拒绝读取应用容器时会显示权限提示，需为实际运行后台服务的程序配置系统访问权限后才能自动同步。
+
+Office 的 Router 入口通过加载项启动参数 `available_models` 同步模型 ID 与显示名称。保存并应用接入设置时，适配程序读取当前模型目录，为 Word、Excel 生成独立的自定义加载项清单。名称通过 URL fragment 传给官方插件页面；上游凭据由 router 管理。加载项清单变化时自动递增版本，已有任务窗格在重新加载后读取新名称。首次安装后，从 Office 的“加载项 → 开发人员加载项”选择配置中的入口名称。
+
+名称同步由 Office 接入项的 `settings.model_labels` 启用。该对象声明 `display_name`、`page_origin`、`page_paths`、`model_parameter`、`parameters` 和 `backup_directory`。`parameters` 支持 `{gateway_url}` 与 `{local_token}`，其中 `local_token` 必须是本机网关的非秘密占位值。每个 `settings.applications` 条目同时声明 `manifest_root`、`manifest_pattern`、`source_manifest_id`、`manifest_id`、`manifest_file`。源清单从已安装的官方插件缓存读取，目标清单使用独立 UUID；macOS 的目标目录为相应 Office 容器中的 `Data/Documents/wef/`。适配程序需要 Python 3、`lxml`、`jsonpointer` 和 `packaging`，通过 `adapter.program` 指定已安装这些依赖的 Python。
 
 ## Mods 管理
 

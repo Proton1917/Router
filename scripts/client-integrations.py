@@ -9,7 +9,7 @@ import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 
 
 def read_json(path):
@@ -184,6 +184,112 @@ def office_stores(settings):
     return stores
 
 
+def office_manifests(request):
+    from jsonpointer import resolve_pointer
+    from lxml import etree
+    from packaging.version import Version
+
+    spec = request["integration"]
+    settings = spec["settings"]
+    options = settings["model_labels"]
+    catalog = resolve_pointer(request["config"], spec["catalog_pointer"])
+    labels = [{"id": model["id"], "label": model["name"]} for model in catalog]
+    if not labels or any(not entry["id"] or not entry["label"] for entry in labels):
+        raise ValueError("Office 模型名称目录无效")
+    namespace = {"o": "http://schemas.microsoft.com/office/appforoffice/1.1", "ds": "http://www.w3.org/2000/09/xmldsig#"}
+    parameters = rendered(options["parameters"], spec, settings)
+    parameters[options["model_parameter"]] = json.dumps(labels, ensure_ascii=False, separators=(",", ":"))
+    plans = []
+    for application in settings["applications"]:
+        sources = []
+        for path in Path(application["manifest_root"]).glob(application["manifest_pattern"]):
+            tree = etree.parse(str(path), etree.XMLParser(resolve_entities=False, no_network=True))
+            if tree.findtext("o:Id", namespaces=namespace) != application["source_manifest_id"]:
+                raise ValueError(application["label"] + " 的源加载项标识与配置不一致")
+            sources.append((Version(tree.findtext("o:Version", namespaces=namespace)), tree))
+        if not sources:
+            raise ValueError(application["label"] + " 的源加载项清单不存在")
+        sources.sort(key=lambda item: item[0])
+        tree = sources[-1][1]
+        for signature in tree.xpath("//ds:Signature", namespaces=namespace):
+            signature.getparent().remove(signature)
+        identifier = tree.find("o:Id", namespace)
+        identifier.text = str(uuid.UUID(application["manifest_id"]))
+        display = tree.find("o:DisplayName", namespace)
+        display.set("DefaultValue", options["display_name"])
+        for override in display:
+            if "Value" in override.attrib:
+                override.set("Value", options["display_name"])
+        resources = set(tree.xpath("//*[local-name()='SourceLocation']/@resid"))
+        count = 0
+        for element in tree.xpath("//*[@DefaultValue]"):
+            kind = etree.QName(element).localname
+            if kind != "SourceLocation" and not (kind == "Url" and element.get("id") in resources):
+                continue
+            url = urlsplit(element.get("DefaultValue"))
+            if urlunsplit((url.scheme, url.netloc, "", "", "")) != options["page_origin"] or (url.path or "/") not in options["page_paths"]:
+                continue
+            fragment = dict(parse_qsl(url.fragment, keep_blank_values=True))
+            fragment.update(parameters)
+            element.set("DefaultValue", urlunsplit(url._replace(fragment=urlencode(fragment))))
+            count += 1
+        if count < 2:
+            raise ValueError(application["label"] + " 的加载项清单缺少任务窗格地址")
+        path = Path(application["manifest_file"])
+        current = path.read_bytes() if path.exists() else None
+        version_element = tree.find("o:Version", namespace)
+        version = sources[-1][0]
+        if current is not None:
+            installed = etree.fromstring(current, etree.XMLParser(resolve_entities=False, no_network=True))
+            if installed.findtext("o:Id", namespaces=namespace) != identifier.text:
+                raise ValueError(application["label"] + " 的目标文件属于另一个加载项")
+            version = max(version, Version(installed.findtext("o:Version", namespaces=namespace)))
+        version_element.text = str(version)
+        content = etree.tostring(tree, encoding="UTF-8", xml_declaration=True)
+        configured = current == content
+        if not configured and current is not None:
+            parts = list(version.release)
+            if len(parts) > 4 or any(part > 65535 for part in parts):
+                raise ValueError("Office 加载项版本格式无效")
+            parts.extend([0] * (4 - len(parts)))
+            for index in range(3, -1, -1):
+                if parts[index] < 65535:
+                    parts[index] += 1
+                    break
+                parts[index] = 0
+            else:
+                raise ValueError("Office 加载项版本号已用尽")
+            version_element.text = ".".join(map(str, parts))
+            content = etree.tostring(tree, encoding="UTF-8", xml_declaration=True)
+        plans.append({"label":application["label"], "path":path, "content":content, "current":current, "configured":configured})
+    return plans
+
+
+def write_office_manifest(plan, backup_directory):
+    if plan["configured"]:
+        return
+    path = plan["path"]
+    current = path.read_bytes() if path.exists() else None
+    if current != plan["current"]:
+        raise RuntimeError("Office 加载项清单已变化，请重新应用")
+    if current is not None:
+        backup_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        backup = backup_directory / (path.name + "." + uuid.uuid4().hex)
+        backup.write_bytes(current)
+        backup.chmod(0o600)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=".router-", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(plan["content"])
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    plan["configured"] = True
+
+
 def office_action(request):
     spec = request["integration"]
     settings = spec["settings"]
@@ -191,6 +297,7 @@ def office_action(request):
     action = request["action"]
     checks = gateway_check(spec, settings) if action in ("sync", "check") else []
     changes = []
+    manifests = office_manifests(request) if settings.get("model_labels") else []
     if action == "sync":
         errors = [application["error"] for application in stores if application["error"]]
         if errors:
@@ -234,11 +341,28 @@ def office_action(request):
                         connection.execute("update ItemTable set value=? where key=?", (value, key))
                     connection.commit()
                     changes.append(application["label"])
+        for manifest in manifests:
+            if not manifest["configured"]:
+                if read_json(request["config_path"]) != request["config"]:
+                    raise RuntimeError("路由配置已变化，请刷新后重新应用接入")
+                write_office_manifest(manifest, Path(settings["model_labels"]["backup_directory"]))
+                changes.append(manifest["label"] + " 模型名称")
         stores = office_stores(settings)
     required = rendered(settings["profile_values"], spec, settings)
     customers_required = rendered(settings["customer_values"], spec, settings)
     applications = [{"label":app["label"],"detected":bool(app["stores"]),"error":app["error"],"configured":not app["error"] and bool(app["stores"]) and all(bool(store["customers"]) and all(all(profile.get(key) == value for key, value in required.items()) for profile in store["profiles"].values()) and all(all(customer.get(key) == value for key, value in customers_required.items()) for customer in store["customers"].values()) for store in app["stores"])} for app in stores]
-    return {"ok":True,"configured":all(app["configured"] for app in applications),"applications":applications,"gateway_url":spec["gateway_url"],"checks":checks,"changes":changes,"message":"插件接入配置已保存；重新打开插件后载入。" if action == "sync" else "已读取 Office 插件接入状态。"}
+    for manifest in manifests:
+        application = next(app for app in applications if app["label"] == manifest["label"])
+        application["models_configured"] = manifest["configured"]
+        application["configured"] = application["configured"] and manifest["configured"]
+        if not manifest["configured"] and not application["error"]:
+            application["error"] = "模型名称待同步，请应用已保存配置"
+    if manifests and all(plan["configured"] for plan in manifests):
+        checks.append({"label":"加载项模型名称", "ok":True})
+    message = "插件接入配置已保存；重新打开插件后载入。" if action == "sync" else "已读取 Office 插件接入状态。"
+    if manifests:
+        message += " 请从 Office 加载项中打开“" + settings["model_labels"]["display_name"] + "”；已有窗口在重新加载后更新名称。"
+    return {"ok":True,"configured":all(app["configured"] for app in applications),"applications":applications,"gateway_url":spec["gateway_url"],"checks":checks,"changes":changes,"message":message}
 
 
 def main():

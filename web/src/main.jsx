@@ -218,7 +218,14 @@ function App() {
       if (commandsChanged) await api('commands/install', {});
       if (serverChanged) await restartService();
       for (const [id, integration] of Object.entries(data.config.management.integrations || {})) {
-        if (pretty(snapshot.config.management.integrations?.[id]) === pretty(integration)) continue;
+        const presentation = config => (integration.slots || []).filter(slot => slot.visible).map(slot => {
+          const destination = config.profiles[slot.profile]?.standard;
+          const model = destination?.model || slot.model;
+          const target = destination?.target || '';
+          return slot.label ? [slot.model, slot.label] : [slot.model, model, target, config.management.labels?.[`model:${model}`], config.management.labels?.[`backend:${target}`]];
+        });
+        const labelsChanged = integration.settings?.model_labels && pretty(presentation(snapshot.config)) !== pretty(presentation(data.config));
+        if (!labelsChanged && pretty(snapshot.config.management.integrations?.[id]) === pretty(integration)) continue;
         try { await api('integrations/action', { id, action: 'sync', revision: data.revision }); }
         catch (error) { throw new Error(`路由配置已保存；${integration.label} 接入同步失败：${error.message}`); }
       }
