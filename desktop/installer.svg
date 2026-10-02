@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="460" viewBox="0 0 720 460">
+  <defs>
+    <linearGradient id="base" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f8f9ef"/><stop offset=".55" stop-color="#e9f1e4"/><stop offset="1" stop-color="#d8e8df"/></linearGradient>
+    <radialGradient id="light"><stop stop-color="#ffffff" stop-opacity=".96"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+    <radialGradient id="green"><stop stop-color="#8caf98" stop-opacity=".28"/><stop offset="1" stop-color="#8caf98" stop-opacity="0"/></radialGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2=".5" y2="1"><stop stop-color="#fff" stop-opacity=".8"/><stop offset=".58" stop-color="#fff" stop-opacity=".32"/><stop offset="1" stop-color="#edf4e9" stop-opacity=".58"/></linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffffff"/><stop offset=".52" stop-color="#fff" stop-opacity=".32"/><stop offset="1" stop-color="#fff" stop-opacity=".92"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="13"/></filter>
+  </defs>
+  <rect width="720" height="460" fill="url(#base)"/>
+  <ellipse cx="128" cy="56" rx="360" ry="270" fill="url(#light)"/>
+  <ellipse cx="665" cy="403" rx="360" ry="320" fill="url(#green)"/>
+  <ellipse cx="520" cy="102" rx="225" ry="155" fill="url(#light)"/>
+  <path d="M510 -90C410 20 655 60 683 188S650 350 795 401" fill="none" stroke="#fff" stroke-opacity=".34" stroke-width="56"/>
+  <text x="48" y="76" font-family="Georgia,serif" font-size="46" font-weight="bold" letter-spacing="-2" fill="#254f3c">router<tspan fill="#6d9274">.</tspan></text>
+  <text x="51" y="113" font-family="PingFang SC,Hiragino Sans GB,sans-serif" font-size="14" fill="#5a7666">拖动 Router 到右侧，完成安装。</text>
+  <text x="669" y="66" text-anchor="end" font-family="Helvetica Neue,sans-serif" font-size="10" letter-spacing="2.5" fill="#6b8474">FOR macOS</text>
+  <rect x="57" y="165" width="606" height="191" rx="39" fill="#325e42" opacity=".11" filter="url(#shadow)"/>
+  <rect x="48.5" y="149.5" width="623" height="205" rx="38" fill="url(#glass)" stroke="url(#edge)" stroke-width="1.5"/>
+  <path d="M87 151H632" stroke="#fff" stroke-opacity=".85" stroke-width="1.4"/>
+  <rect x="328" y="226" width="64" height="43" rx="21.5" fill="#fff" fill-opacity=".56" stroke="#fff" stroke-opacity=".86"/>
+  <path d="M347 247.5H373M365 239.5L373 247.5L365 255.5" stroke="#50745b" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="51" cy="400" r="3" fill="#82a17c"/>
+  <text x="63" y="404" font-family="PingFang SC,Hiragino Sans GB,sans-serif" font-size="12" fill="#5a7361">安装后，从“应用程序”打开 Router。</text>
+  <text x="670" y="404" text-anchor="end" font-family="Helvetica Neue,sans-serif" font-size="10" fill="#7a8d7d">Apple Silicon · macOS 14+</text>
+</svg>

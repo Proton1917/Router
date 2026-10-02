@@ -16,6 +16,8 @@
 /desktop/src-tauri/resources/
 /desktop/src-tauri/icons/
 /desktop/.work/
+/desktop/.pixi/
+/desktop/__pycache__/
 /desktop/**/*.log
 /desktop/**/.DS_Store
 /desktop/**/.env

@@ -8,8 +8,10 @@ import { buildEnvironment } from './build-environment.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const desktop = fileURLToPath(new URL('./', import.meta.url));
 if (process.platform !== 'darwin') throw new Error('当前桌面安装流程需要 macOS。');
-for (const [path, expected] of Object.entries(JSON.parse(readFileSync(`${desktop}notices-lock.json`, 'utf8')))) {
-  const actual = createHash('sha256').update(readFileSync(root + path)).digest('hex');
+const noticeLock = JSON.parse(readFileSync(`${desktop}notices-lock.json`, 'utf8'));
+if (noticeLock.algorithm !== 'blake2b512') throw new Error('许可声明记录格式无效，请按 README 重新生成。');
+for (const [path, expected] of Object.entries(noticeLock.files)) {
+  const actual = createHash(noticeLock.algorithm).update(readFileSync(root + path)).digest('hex');
   if (actual !== expected) throw new Error(`依赖锁文件已变化，请按 README 重新生成许可声明：${path}`);
 }
 execFileSync('cargo', ['build', '--release', '--locked', '--manifest-path', 'router-rs/Cargo.toml'], { cwd: root, env: buildEnvironment(), stdio: 'inherit' });

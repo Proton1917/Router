@@ -1,5 +1,8 @@
 {
-  "router-rs/Cargo.lock": "f7f96f90fd9d7edd59accace80ef9cb6cddb8269295e8e028abf83b8cc4fac17",
-  "desktop/src-tauri/Cargo.lock": "da105ca1112e1a56034b7beb7714c6007beed39c4f31b602bc71c33a02e9ca5d",
-  "web/package-lock.json": "24c1e9fd4831985d8bdc51e396cecb2ab35b5c5a01bc1c4fcc845d6d88adad03"
+  "algorithm": "blake2b512",
+  "files": {
+    "router-rs/Cargo.lock": "4639f9c6d7c35b72021f95f5b6b0f829677e8e94d36c06dd60024902f89d62ed680bab8650c8bcbc48065a8b52c3c8881e98827f14a213771f07ec255b151a35",
+    "desktop/src-tauri/Cargo.lock": "2de72324ea9a358c01b8761d52e7d89b11d9ea9b539e44da4b70f832632b7bcfe60ac1e5af0c74811fb97507354111249b8193eea2172278e45e3a9ca4e3a99a",
+    "web/package-lock.json": "ed8a6370263a829578daabf6942294c14235cc7e0687cacc6322d7e9e844bf6200d49b1c32b2c1ac82a41e6ef642d9d348597842566a692e8cf8e68c319022d0"
+  }
 }

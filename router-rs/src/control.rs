@@ -45,6 +45,8 @@ pub struct LaunchTemplate {
     #[serde(default)]
     pub options: BTreeMap<String, LaunchOption>,
     #[serde(default)]
+    pub supports_mods: bool,
+    #[serde(default)]
     pub env: BTreeMap<String, String>,
     #[serde(default)]
     pub unset_env: Vec<String>,
@@ -115,6 +117,8 @@ pub struct CommandSpec {
     #[serde(default)]
     pub options: BTreeMap<String, String>,
     #[serde(default)]
+    pub mod_profile: Option<String>,
+    #[serde(default)]
     pub env: BTreeMap<String, String>,
     #[serde(default)]
     pub unset_env: Vec<String>,
@@ -155,10 +159,15 @@ pub struct Management {
     pub generated_cases: Vec<String>,
     #[serde(default)]
     pub integrations: BTreeMap<String, crate::integrations::Integration>,
+    #[serde(default)]
+    pub mods: Option<crate::mods::ModConfig>,
 }
 
 impl Management {
     pub fn validate(&self) -> Result<()> {
+        if let Some(mods) = &self.mods {
+            mods.validate()?;
+        }
         ensure!(
             self.listen.ip().is_loopback(),
             "管理界面必须监听 loopback 地址"
@@ -186,6 +195,15 @@ impl Management {
                 .templates
                 .get(&command.template)
                 .with_context(|| format!("命令 {name} 引用了不存在的启动模板"))?;
+            if let Some(profile) = &command.mod_profile {
+                ensure!(template.supports_mods, "命令 {name} 的启动方式不支持 Mods");
+                ensure!(
+                    self.mods
+                        .as_ref()
+                        .is_some_and(|mods| mods.profiles.contains_key(profile)),
+                    "命令 {name} 的 Mod 组合不存在"
+                );
+            }
             for (option, choice) in &command.options {
                 let setting = template
                     .options
@@ -865,6 +883,21 @@ struct IntegrationRequest {
     revision: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct ModRequest {
+    action: String,
+    entry: Option<String>,
+}
+
+async fn mod_action(
+    State(state): State<ControlState>,
+    Json(request): Json<ModRequest>,
+) -> Result<Json<Value>, ApiError> {
+    Ok(Json(
+        crate::mods::perform(&state.path, &request.action, request.entry.as_deref()).await?,
+    ))
+}
+
 async fn integration_action(
     State(state): State<ControlState>,
     Json(request): Json<IntegrationRequest>,
@@ -985,6 +1018,7 @@ pub async fn bind(
         .route("/commands/preview", post(launch_preview))
         .route("/backends/probe", post(backend_probe))
         .route("/integrations/action", post(integration_action))
+        .route("/mods/action", post(mod_action))
         .route("/service/restart", post(restart))
         .route(
             "/health",
@@ -1001,6 +1035,17 @@ pub async fn bind(
     let app = Router::new()
         .nest("/api", api)
         .fallback_service(ServeDir::new(assets))
+        .layer(middleware::map_response(
+            |mut response: axum::response::Response| async move {
+                if !response.headers().contains_key(http::header::CACHE_CONTROL) {
+                    response.headers_mut().insert(
+                        http::header::CACHE_CONTROL,
+                        http::HeaderValue::from_static("no-cache"),
+                    );
+                }
+                response
+            },
+        ))
         .layer(DefaultBodyLimit::max(manager.max_request_bytes));
     let listener = tokio::net::TcpListener::bind(manager.listen).await?;
     eprintln!("router page available at http://{}", manager.listen);

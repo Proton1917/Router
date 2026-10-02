@@ -1,0 +1,15 @@
+[workspace]
+name = "router-installer"
+version = "0.3.0"
+channels = ["conda-forge"]
+platforms = ["osx-arm64"]
+
+[dependencies]
+python = "3.12.*"
+librsvg = ">=2.58"
+
+[pypi-dependencies]
+dmgbuild = "==1.6.7"
+
+[tasks]
+installer = "python installer.py"

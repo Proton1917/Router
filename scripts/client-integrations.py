@@ -1,5 +1,4 @@
 import fcntl
-import hashlib
 import json
 import os
 import shutil
@@ -7,6 +6,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -27,11 +27,9 @@ def atomic_json(path, value, backup_directory, expected):
     backup_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(backup_directory, 0o700)
     if path.exists():
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()[:16]
-        backup = backup_directory / (path.name + "." + digest)
-        if not backup.exists():
-            shutil.copyfile(path, backup)
-            os.chmod(backup, 0o600)
+        backup = backup_directory / (path.name + "." + uuid.uuid4().hex)
+        shutil.copyfile(path, backup)
+        os.chmod(backup, 0o600)
     descriptor, temporary = tempfile.mkstemp(prefix=".router-", dir=path.parent)
     try:
         with os.fdopen(descriptor, "w") as stream:
@@ -160,15 +158,29 @@ def office_stores(settings):
     stores = []
     for application in settings["applications"]:
         found = []
-        for path in Path(application["storage_root"]).rglob("localstorage.sqlite3"):
-            with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as connection:
-                tables = connection.execute("select name from sqlite_master where type='table'").fetchall()
-                if ("ItemTable",) not in tables:
+        error = None
+        def scan_error(failure):
+            if isinstance(failure, FileNotFoundError):
+                return
+            raise failure
+        try:
+            for directory, _, files in os.walk(application["storage_root"], onerror=scan_error):
+                if "localstorage.sqlite3" not in files:
                     continue
-                row = connection.execute("select value from ItemTable where key=?", (settings["profile_keys"][0],)).fetchone()
-                if row is not None:
-                    found.append({"path":path,"profile":decode_storage(row[0])})
-        stores.append({"label":application["label"],"stores":found})
+                path = Path(directory) / "localstorage.sqlite3"
+                with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as connection:
+                    tables = connection.execute("select name from sqlite_master where type='table'").fetchall()
+                    if ("ItemTable",) not in tables:
+                        continue
+                    keys = settings["profile_keys"] + settings["customer_keys"]
+                    rows = dict(connection.execute("select key,value from ItemTable where key in (" + ",".join("?" for _ in keys) + ")", keys).fetchall())
+                    profiles = {key: decode_storage(rows[key]) for key in settings["profile_keys"] if key in rows}
+                    customers = {key: decode_storage(rows[key]) for key in settings["customer_keys"] if key in rows}
+                    if profiles:
+                        found.append({"path": path, "profiles": profiles, "customers": customers})
+        except PermissionError:
+            error = f'{application["label"]} 插件存储读取被 macOS 拒绝，请在系统设置的“隐私与安全性”中检查 router 的访问权限'
+        stores.append({"label":application["label"],"stores":found,"error":error})
     return stores
 
 
@@ -180,8 +192,12 @@ def office_action(request):
     checks = gateway_check(spec, settings) if action in ("sync", "check") else []
     changes = []
     if action == "sync":
-        if any(not application["stores"] for application in stores):
-            raise RuntimeError("未检测到部分 Office 插件，请先在对应 Office 应用中打开 Claude 插件一次")
+        errors = [application["error"] for application in stores if application["error"]]
+        if errors:
+            raise RuntimeError("；".join(errors))
+        missing = [application["label"] for application in stores if not application["stores"]]
+        if missing:
+            raise RuntimeError("尚未找到 " + "、".join(missing) + " 的 Claude 接入配置，请在对应应用中打开插件并完成首次配置")
         backup_directory = Path(settings["backup_directory"])
         backup_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(backup_directory, 0o700)
@@ -192,9 +208,11 @@ def office_action(request):
                     original = dict(connection.execute("select key,value from ItemTable where key in (" + ",".join("?" for _ in settings["profile_keys"] + settings["customer_keys"]) + ")", settings["profile_keys"] + settings["customer_keys"]).fetchall())
                     updates = {}
                     for keys, fields in ((settings["profile_keys"], settings["profile_values"]), (settings["customer_keys"], settings["customer_values"])):
+                        if not any(key in original for key in keys):
+                            raise ValueError(application["label"] + " 插件接入配置不完整，请在插件中完成首次配置")
                         for key in keys:
                             if key not in original:
-                                raise ValueError("插件接入配置不完整，请先在插件中完成首次配置")
+                                continue
                             value = decode_storage(original[key])
                             revised = {**value, **rendered(fields, spec, settings)}
                             if revised != value:
@@ -218,7 +236,8 @@ def office_action(request):
                     changes.append(application["label"])
         stores = office_stores(settings)
     required = rendered(settings["profile_values"], spec, settings)
-    applications = [{"label":app["label"],"detected":bool(app["stores"]),"configured":bool(app["stores"]) and all(all(store["profile"].get(key) == value for key, value in required.items()) for store in app["stores"])} for app in stores]
+    customers_required = rendered(settings["customer_values"], spec, settings)
+    applications = [{"label":app["label"],"detected":bool(app["stores"]),"error":app["error"],"configured":not app["error"] and bool(app["stores"]) and all(bool(store["customers"]) and all(all(profile.get(key) == value for key, value in required.items()) for profile in store["profiles"].values()) and all(all(customer.get(key) == value for key, value in customers_required.items()) for customer in store["customers"].values()) for store in app["stores"])} for app in stores]
     return {"ok":True,"configured":all(app["configured"] for app in applications),"applications":applications,"gateway_url":spec["gateway_url"],"checks":checks,"changes":changes,"message":"插件接入配置已保存；重新打开插件后载入。" if action == "sync" else "已读取 Office 插件接入状态。"}
 
 

@@ -17,9 +17,9 @@ open -a Router
 
 Homebrew 会自动添加项目的 Tap。升级桌面应用使用 `brew upgrade --cask Proton1917/tap/router`，卸载使用 `brew uninstall --cask Proton1917/tap/router`。已部署的后台程序、网页资源、配置和凭据保存在所选配置目录中，关闭或卸载桌面应用后会保留；后台程序和网页资源的升级步骤见下文“升级与文件位置”。
 
-在 [Releases](https://github.com/Proton1917/Router/releases) 下载 `Router_0.2.1_aarch64.dmg` 和 `SHA256SUMS.txt`。将两个文件放在同一目录，执行 `shasum -a 256 -c SHA256SUMS.txt` 校验完整性，再执行以下安装步骤。也可以按下文“从源码构建桌面安装包”自行构建。
+在 [Releases](https://github.com/Proton1917/Router/releases) 下载 `Router_0.3.0_aarch64.dmg` 和 `SHA256SUMS.txt`。将两个文件放在同一目录，执行 `shasum -a 256 -c SHA256SUMS.txt` 校验下载完整性，再执行以下安装步骤。也可以按下文“从源码构建桌面安装包”自行构建。
 
-1. 打开 `Router_0.2.1_aarch64.dmg`，将 **Router.app** 拖入“应用程序”。
+1. 打开 `Router_0.3.0_aarch64.dmg`，将 **Router.app** 拖入“应用程序”。
 2. 打开 Router。首次使用可以选择“创建新配置”，也可以通过“选择已有配置文件”接入已有 `router.json`。已有配置需包含 `management`，网页资源路径需存在。
 3. 创建配置时确认配置目录、终端入口目录和两个监听地址，点击“安装并打开控制台”。默认分别为 `~/.config/router`、`~/.local/bin`、`127.0.0.1:8080` 和 `127.0.0.1:8081`。已有文件或端口冲突会显示具体错误。
 4. 保持“自动配置 Zsh 终端入口”选中，会在 `~/.zshrc` 添加初始化语句并备份原文件。重新打开终端后，`router` 及以后在界面新增的命令即可使用。
@@ -49,7 +49,7 @@ Homebrew 会自动添加项目的 Tap。升级桌面应用使用 `brew upgrade -
 
 ## 从源码构建桌面安装包
 
-取得源码后，在项目根目录执行。需要 macOS 14+、Xcode Command Line Tools、Rust stable（Tauri 2.12 要求至少 Rust 1.90）、Node.js 20.19+ 或 22.12+，以及 npm。依赖由 Cargo 和 npm 锁文件固定。
+取得源码后，在项目根目录执行。需要 macOS 14+、Xcode Command Line Tools、Rust stable（Tauri 2.12 要求至少 Rust 1.90）、Node.js 20.19+ 或 22.12+、npm 和 Pixi。依赖由 Cargo、npm 和 Pixi 锁文件固定。
 
 ```sh
 git clone https://github.com/Proton1917/Router.git
@@ -58,7 +58,7 @@ npm ci --prefix desktop
 npm run build --prefix desktop
 ```
 
-构建过程会编译 router、构建网页、生成应用图标并打包。应用位于 `desktop/src-tauri/target/release/bundle/macos/Router.app`，安装镜像位于 `desktop/src-tauri/target/release/bundle/dmg/`。构建依赖仅用于开发，安装后的运行程序不依赖 Node.js。
+构建过程会编译 router、构建网页、生成应用图标并打包。应用位于 `desktop/src-tauri/target/release/bundle/macos/Router.app`，安装镜像位于 `desktop/src-tauri/target/release/bundle/dmg/`。安装窗口由 `desktop/installer.svg` 和 `desktop/installer.json` 定义，使用 Retina 背景、固定图标位置和中文拖放引导；`dmgbuild` 在独立 Pixi 环境中生成 Finder 布局。构建依赖仅用于开发，安装后的运行程序不依赖 Node.js。
 
 开发时运行 `npm run dev --prefix desktop`。先执行 `npm run prepare:bundle --prefix desktop` 可以准备直接运行 Cargo 检查所需的资源。
 
@@ -207,6 +207,20 @@ npm run build --prefix web
 Rust 负责校验、路由生成、管理接口和有超时限制的适配程序调用。客户端目录格式和部署路径由外部配置及 `scripts/client-integrations.py` 管理。适配程序通过标准输入接收 JSON，通过标准输出返回包含 `ok` 的 JSON 结果，支持 `inspect`、`sync`、`check`。配置中的路径和命令可按部署环境调整。
 
 提供的适配程序支持活动 JSON 模型目录，以及 Office WebKit 中已有的插件接入存储。JSON 修改保留其他字段，Office 修改通过 SQLite 事务更新接入项，写入前在受保护目录保存备份。真实上游凭据仍由 router 单独读取，客户端使用本地占位令牌。Office 的首次安装或首次加载由宿主应用完成；同步后重新打开客户端或插件载入地址和目录，路由调整对后续请求生效。连接检查验证网关、HTTPS 证书及目录，不代表上游账号已获得所有模型权限。
+
+应用配置时，仅同步发生修改的客户端接入项。模型和路由配置由后续请求直接读取。Office 接入页分别报告各宿主应用的配置状态；macOS 拒绝读取应用容器时会显示权限提示，需为实际运行后台服务的程序配置系统访问权限后才能自动同步。
+
+## Mods 管理
+
+“Mods 管理”提供命名组合、逐项“继承 / 启用 / 停用”，以及启动命令绑定。先创建组合并设置各 Mod，再为支持 Mods 的命令选择组合，点击“应用修改”。新启动的会话读取选择。Mod 的所属插件及其其他组件会一同启停；组织管理策略继续由客户端执行。
+
+可以添加已安装插件的完整 ID，或者添加本地插件目录 / ZIP 路径。本地目录使用清单中的 `name@inline` 标识，“校验”调用客户端的插件校验命令。已有会话保留当前加载状态；客户端原生的插件管理与重载操作继续可用。内置条目的使用条件在卡片中显示，例如辅助提醒功能可能需要官方账号、遥测和组织资格。
+
+配置结构位于 `management.mods`：`catalog` 保存条目，`profiles` 保存组合，`adapter` 指定外部适配程序，`settings` 保存客户端程序与临时设置目录。启动方式通过 `supports_mods` 声明支持；命令的 `mod_profile` 引用组合。普通组合和条目修改通过 JSON 生效。Rust 提供通用校验、调用和启动转交，客户端专属设置由 `scripts/claude-mods.py` 处理。
+
+Claude Code 适配程序要求 2.1.287 及以上版本、Python 3 和 `packaging`。在“客户端与运行环境”中填写这台机器的 Claude Code、Python 和适配脚本路径。桌面首次安装的脚本在配置目录的 `application/scripts/claude-mods.py`；命令行安装应将该路径调整为自己的脚本安装位置。
+
+启动时，适配程序保留已有 `--settings` 中的模型、上下文及其他字段，将所选组合合并至 `enabledPlugins`，通过权限为 `0600` 的临时设置文件启动客户端。调用者的文件权限设置继续传递给客户端；退出后移除临时文件。未绑定组合的命令直接使用原有启动配置。
 
 [配置示例](router-rs/examples/router.json) 分别声明 Messages 和 Responses 后端。部署时填写自己的地址和凭据来源。示例通过 `MESSAGES_API_KEY` 和 `RESPONSES_API_KEY` 环境变量读取凭据。模型由客户端选择，示例路由保留客户端传入的模型 ID。
 

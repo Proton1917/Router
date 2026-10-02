@@ -13,6 +13,7 @@
   "templates": {
     "messages-client": {
       "label": "Claude Code API",
+      "supports_mods": true,
       "description": "通过网关调用兼容 Messages 的后端。",
       "program": "claude",
       "args": [],
@@ -51,5 +52,16 @@
       "unset_env": ["OPENAI_API_KEY", "OPENAI_BASE_URL"]
     }
   },
-  "commands": {}
+  "commands": {},
+  "mods": {
+    "adapter": {"program":"python3", "args":["{{ config_directory }}/application/scripts/claude-mods.py"]},
+    "timeout_ms": 45000,
+    "settings": {"program":"claude", "minimum_version":"2.1.287", "launch_directory":"client-state/mods"},
+    "catalog": {
+      "diff": {"label":"Diff 面板", "plugin_id":"cc-plugin-diff@builtin", "description":"显示文件改动和差异面板。", "builtin":true},
+      "agents-md": {"label":"AGENTS.md 指令", "plugin_id":"cc-plugin-agents-md@builtin", "description":"将项目 AGENTS.md 加载为客户端指令。", "builtin":true},
+      "you-should-know": {"label":"You should know", "plugin_id":"cc-plugin-you-should-know@builtin", "description":"在任务执行期间提供辅助提醒。", "builtin":true, "availability":"需要官方账号会话、遥测及组织可用资格。"}
+    },
+    "profiles": {"default":{"label":"默认组合", "plugins":{}}}
+  }
 }

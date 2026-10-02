@@ -19,6 +19,7 @@ mod body;
 mod cli;
 mod control;
 mod integrations;
+mod mods;
 mod prepare;
 mod routing;
 mod runtime;

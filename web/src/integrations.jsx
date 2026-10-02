@@ -29,7 +29,7 @@ export function IntegrationWorkspace({ config, revision, dirty, api, onEdit, onC
         <div className="integration-endpoint"><span>{spec.require_https ? 'HTTPS 接入地址' : '接入地址'}</span><code>{spec.gateway_url}</code></div>
         {spec.commands?.length > 0 && <div className="integration-commands">{spec.commands.map(name => <button key={name} onClick={() => onCommand(name)}><strong>{name}</strong><span>配置命令 →</span></button>)}</div>}
         {visible.length > 0 && <div className="integration-models">{visible.slice(0, 3).map(modelRow)}{visible.length > 3 && <details className="integration-more"><summary>查看其余 {visible.length - 3} 个模型入口</summary><div className="integration-models">{visible.slice(3).map(modelRow)}</div></details>}</div>}
-        {report?.applications && <div className="integration-checks">{report.applications.map(app => <span key={app.label}>{app.configured ? '✓' : '○'} {app.label} · {app.configured ? '地址已配置' : app.detected ? '地址待同步' : '未检测到插件'}</span>)}</div>}
+        {report?.applications && <div className="integration-checks">{report.applications.map(app => <span key={app.label} className={app.error ? 'integration-error' : ''}>{app.configured ? '✓' : '○'} {app.label} · {app.error || (app.configured ? '地址已配置' : app.detected ? '地址待同步' : '尚未完成插件接入')}</span>)}</div>}
         {report?.checks && <div className="integration-checks">{report.checks.map(check => <span key={check.label}>✓ {check.label}{check.count !== undefined ? ` · ${check.count} 个模型` : ''}</span>)}</div>}
         {report?.error && <div className="integration-error" role="alert">{report.error}</div>}
         {report?.message && <p className="integration-report">{report.message}</p>}

@@ -163,7 +163,11 @@ async fn connect(app: &AppHandle, config: &Path) -> Result<()> {
         config.parent().context("配置目录不存在")?.join(token_path)
     };
     let token = fs::read_to_string(token_path)?;
-    let url: tauri::Url = format!("http://{address}/").parse()?;
+    let mut url: tauri::Url = format!("http://{address}/").parse()?;
+    url.set_query(Some(&format!(
+        "desktop_version={}",
+        env!("CARGO_PKG_VERSION")
+    )));
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
         .build()?;

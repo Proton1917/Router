@@ -513,6 +513,11 @@ fn launch_spec(path: &Path, name: &str, extra: &[String]) -> Result<LaunchSpec> 
             path.to_string_lossy().into_owned(),
         );
     }
+    let (program, args) = if template.deferred {
+        (program, args)
+    } else {
+        crate::mods::wrap(path, name, program, args)?
+    };
     Ok(LaunchSpec {
         program,
         args,
@@ -615,6 +620,7 @@ fn execute_client(
     if let Some(variable) = &template.deferred_model_env {
         removed.push(variable.clone());
     }
+    let (program, args) = crate::mods::wrap(path, name, program.to_owned(), args.to_vec())?;
     if preview {
         let mut visible = template
             .capture_env
@@ -627,8 +633,8 @@ fn execute_client(
         );
     }
     replace_process(&mut configured_process(
-        program,
-        args,
+        &program,
+        &args,
         &environment,
         &removed,
     ))

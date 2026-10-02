@@ -1,0 +1,23 @@
+{
+  "volume_name": "Router 安装",
+  "format": "UDZO",
+  "filesystem": "HFS+",
+  "window_rect": [[180, 180], [720, 460]],
+  "icon_locations": {"Router.app": [180, 244], "应用程序": [540, 244], ".background.tiff": [1800, 1800], ".DS_Store": [1800, 1880]},
+  "icon_size": 112,
+  "text_size": 13,
+  "grid_spacing": 80,
+  "label_pos": "bottom",
+  "arrange_by": null,
+  "scroll_position": [0, 0],
+  "show_status_bar": false,
+  "show_tab_view": false,
+  "show_toolbar": false,
+  "show_pathbar": false,
+  "show_sidebar": false,
+  "default_view": "icon-view",
+  "include_icon_view_settings": true,
+  "include_list_view_settings": false,
+  "hide_extensions": [],
+  "symlinks": {"应用程序": "/Applications"}
+}
