@@ -252,6 +252,26 @@ Rust 实现配置校验、规则执行、HTTP 传输和协议编解码。增加�
 
 后端的 `auth.error_hint` 可填写凭据读取失败时的处理说明，例如重新登录所用的命令。该说明会随错误返回客户端，因此只应包含可公开的操作指引。凭据程序的标准错误输出不会传给客户端。
 
+需要 OAuth 协议适配的服务可以通过独立的本机适配程序接入。适配程序负责登录、刷新 OAuth 凭据和提供兼容接口；Router 后端指向它的回环地址，并声明已验证的接口协议。适配程序的二进制、运行目录和 OAuth 凭据分别管理，实际资源占用包含该进程。
+
+`scripts/service-token.py` 支持在 macOS/Linux 上按需启动本机适配服务。它依赖 Python 3 和 `requests`，作为后端的 `auth.token_command` 使用，参数为下列 JSON 配置文件的路径。健康检查通过后，程序才向标准输出提供本机服务令牌。令牌文件须仅允许当前用户访问；健康检查仅接受回环 HTTP 地址，禁止重定向，并且不使用环境中的代理设置。
+
+```json
+{
+  "token_file": "/absolute/private/credentials/adapter-key",
+  "health_url": "http://127.0.0.1:43185/v1/models",
+  "health_headers": {"Authorization": "Bearer {token}"},
+  "health_status": 200,
+  "ready_timeout_seconds": 15,
+  "probe_timeout_seconds": 2,
+  "poll_interval_seconds": 0.2,
+  "lock_file": "/absolute/runtime/adapter/service.lock",
+  "start_command": ["/absolute/runtime/adapter/start-service"]
+}
+```
+
+`start_command` 必须启动后台服务并在期限内返回。程序使用文件锁协调并发启动；认证失败、非预期 HTTP 状态和启动失败会直接返回错误。服务端应只监听回环地址，OAuth 凭据与本机服务令牌均保存于仓库外的受保护目录。健康检查证明本机适配服务可用，上游模型权限需要通过真实请求验证。
+
 供应商参数由 `runtime.backends.<id>.provider_fields` 声明。例如某个后端要求 `provider.only` 时，可配置：
 
 ```json
