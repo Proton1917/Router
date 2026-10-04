@@ -70,6 +70,8 @@ pub struct LaunchTemplate {
     pub request_headers: BTreeMap<String, String>,
     #[serde(default)]
     pub route_before: Option<String>,
+    #[serde(default)]
+    pub model_adapter: Option<ProcessSpec>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -106,6 +108,8 @@ pub struct CommandSpec {
     pub model: Option<String>,
     #[serde(default)]
     pub profile: Option<String>,
+    #[serde(default)]
+    pub model_bindings: Vec<crate::command_models::ModelBinding>,
     #[serde(default)]
     pub match_all_models: bool,
     #[serde(default)]
@@ -195,6 +199,7 @@ impl Management {
                 .templates
                 .get(&command.template)
                 .with_context(|| format!("命令 {name} 引用了不存在的启动模板"))?;
+            crate::command_models::validate(name, command, template)?;
             if let Some(profile) = &command.mod_profile {
                 ensure!(template.supports_mods, "命令 {name} 的启动方式不支持 Mods");
                 ensure!(
@@ -517,6 +522,7 @@ pub fn prepare_candidate(current: &Value, mut candidate: Value) -> Result<(Value
         candidate["validation_cases"].as_array_mut().expect("cases array").push(json!({"name": id, "context": client.id, "model": model, "headers": case_headers, "expected": {"rule_id": id, "target": target, "model": model}}));
         managed_ids.push(id);
     }
+    crate::command_models::materialize(&mut candidate, &mut managed_ids)?;
     crate::integrations::materialize(&mut candidate, &mut managed_ids)?;
     candidate["management"]["generated_routes"] = json!(managed_ids);
     candidate["management"]["generated_cases"] = json!(managed_ids);

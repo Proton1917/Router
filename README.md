@@ -143,7 +143,7 @@ router templates list
 router config check
 ```
 
-命令名称来自 `management.commands`。每个命令可以选择启动方式、默认模型、独立模型路由、附加参数和环境变量。启动方式定义程序、参数、模型参数标记、API 请求标记及可选的启动器集成。模板使用 MiniJinja，提供 `config`、`command_name`、`command`、`model`、`profile`、`gateway_url`、`command_header` 和 `headers_text` 等变量。
+命令名称来自 `management.commands`。每个命令可以选择启动方式、默认模型、可选模型列表、附加参数和环境变量。启动方式定义程序、参数、模型参数标记、API 请求标记及可选的启动器集成。模板使用 MiniJinja，提供 `config`、`command_name`、`command`、`model`、`profile`、`gateway_url`、`command_header` 和 `headers_text` 等变量。
 
 `router web` 按照 `management.browser` 打开本机配置页面，示例使用 Safari。转发入口与网页入口由同一个 Rust 进程提供，关闭浏览器后继续运行。网页包括启动命令、API 后端、模型配置、路由规则、启动方式、服务设置、客户端接入和 Mods 管理。常用参数使用表单编辑，完整 JSON 编辑保留全部配置能力。
 
@@ -151,11 +151,21 @@ router config check
 
 新增命令在网页中填写名称、选择启动方式和模型后，应用修改会自动同步终端入口。模型的标准与 Fast 目标可通过“服务等级”选择上游标准、Priority 或 Flex 服务。启动方式的 `options` 可以声明选项名称、默认值和各选项对应的参数数组，网页自动生成下拉框；每个命令在自身 `options` 中保存所选值。例如 Codex 的启动服务等级通过该机制生成 `-c service_tier="fast"` 参数，运行时发送 `service_tier: "priority"`。
 
+启动命令卡片列出全部已绑定的模型及服务来源。在“编辑命令与模型”中可以添加、删除、排序或隐藏条目，为每项选择 API 后端、模型配置和显示名称，并从可见列表中选择默认启动模型。“自定义标准与 Fast 目标”会为该命令创建独立模型配置。显示名称留空时，按目标 API 模型读取 `management.labels["model:<模型 ID>"]`，未设置名称时显示 API 模型 ID。
+
+多模型列表保存在命令的 `model_bindings` 数组，每项包含 `id`、`model`、`profile`、可选的 `label`、`description`、`visible`、`aliases` 和 `route_ids`。`aliases` 用于启动器将已有名称规范化为当前客户端模型标识；`route_ids` 将指定的现有兼容路由关联到该模型配置，要求这些路由仅属于同一客户端上下文。Router 为各条目生成同时匹配客户端、命令请求头和模型标识的独立路由。压缩和子任务等特殊规则应位于启动方式的 `route_before` 之前。单模型 `profile` 与 `model_bindings` 不能同时设置。
+
+Claude Code 启动方式通过 `model_adapter` 调用 `scripts/claude-model-catalog.py`，依赖 Python 3 标准库。该程序接收包含配置、命令名称和启动参数的 JSON，输出参数及环境变量调整，保留已有 `--settings` 内容，并生成以完整客户端模型 ID 为键的 `modelPicker`。Claude Code 的菜单、切换提示及状态名称由同一条目的 `label` 提供，避免选择别名后重新显示客户端内置名称。自定义显示名称和模型变更在下一次启动时读取；已运行客户端的历史输出保持原样。自动登录判断的启动方式只有进入 API 模式才使用适配程序。
+
+`model_adapter` 的程序与参数使用 MiniJinja，还可引用 `config_path` 和 `config_directory`。安装脚本时，将 `claude-model-catalog.py` 与其他适配程序一同放入配置目录下的 `application/scripts/`，或在启动方式中填写实际路径。Rust 只处理通用模型绑定、作用范围校验和适配程序接口；模型名称、后端、别名和显示规则保存在配置与脚本中。
+
+运行 `python3 scripts/check-command-models.py /absolute/path/to/router.json` 可通过管理接口检查实际配置的重复应用、模型重复、隐藏默认模型和调整顺序等行为。该检查依赖 `requests`，只发送配置预览，不保存修改。
+
 `scripts/codex-api.zsh` 从后端读取 Codex 模型目录，并合并启动方式的默认服务等级、后端目录元数据和同模型、同后端 Fast 目标中的服务等级。启动方式的环境变量 `ROUTER_CODEX_DEFAULT_SERVICE_TIERS` 接受包含 `id`、`name`、`description` 的 JSON 对象数组；OpenRouter 入口可将 `priority` 声明为所有目录模型的默认 Fast 服务等级。该规则也适用于后续新增的目录模型。该脚本依赖 Zsh（含 `zsh/system`）、jq 与 shasum，参数依次为 router 配置文件、目录保存位置、Codex 程序、provider 参数、`--` 和客户端参数。目录应位于仓库外；会话使用的临时文件在客户端退出时删除。API 客户端的会话内快捷命令由客户端自身决定。
 
 每个启动命令保存一份已校验的精简模型目录，默认有效期为 300 秒。启动方式的环境变量 `ROUTER_CODEX_CATALOG_CACHE_SECONDS` 可调整有效期，设为 `0` 时每次启动都重新获取。配置、provider 参数、Codex 版本或目录适配脚本变化会立即使缓存失效。并发启动通过文件锁协调更新；失效目录必须重新获取并通过校验，失败时停止启动。缓存文件权限为 `0600`，只保存精简目录和校验信息；所有 Codex 调用均继承调用者原有的 `umask`。
 
-`router run` 向启动程序提供 `ROUTER_COMMAND_NAME`。Codex 目录只保留该命令绑定的模型，以及带该命令标记的专属路由所引用的模型；名单来自配置，保留上游返回的能力信息。直接调用适配脚本时需设置同名环境变量。修改命令绑定或专属路由后，重新启动客户端即可读取新的模型列表。
+`router run` 向启动程序提供 `ROUTER_COMMAND_NAME`。设置 `model_bindings` 时，Codex 目录只保留该列表中的可见条目；其余命令使用单模型绑定和带该命令标记的专属路由。名单来自配置，保留上游返回的能力信息。直接调用适配脚本时需设置同名环境变量。修改命令绑定或专属路由后，重新启动客户端即可读取新的模型列表。
 
 `ROUTER_CODEX_CATALOG_MODEL_PATTERN` 可声明后端模型名称需要匹配的正则表达式。OpenRouter 入口可使用 `/` 检查带命名空间的模型 ID；目录不符合要求或缺少已配置模型时启动立即失败。Fast 表示请求上游 `priority` 服务等级，实际使用的服务等级以 OpenRouter 响应为准。
 

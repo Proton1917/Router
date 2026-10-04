@@ -16,6 +16,7 @@
       "supports_mods": true,
       "description": "通过网关调用兼容 Messages 的后端。",
       "program": "claude",
+      "model_adapter": {"program":"python3", "args":["{{ config_directory }}/application/scripts/claude-model-catalog.py"]},
       "args": [],
       "model_flags": ["--model"],
       "header_env": "ANTHROPIC_CUSTOM_HEADERS",

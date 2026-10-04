@@ -13,7 +13,12 @@ $routing[0] as $config
         and any(.values[]?; . == $command)))
     | .profile
   ] | unique) as $profiles
-| ([$profiles[] as $id
+| (if ($entry.model_bindings // [] | length) > 0 then
+    [$entry.model_bindings[] | select(.visible != false)
+      | . as $binding
+      | $config.profiles[$binding.profile] as $profile
+      | {profile:$profile,upstream:$profile.standard.model,client:$binding.model,label:$binding.label}]
+   else ([$profiles[] as $id
     | $config.profiles[$id] as $profile
     | ($profile.standard.model //
         (if $id == $entry.profile then $entry.model else null end)) as $upstream
@@ -27,7 +32,7 @@ $routing[0] as $config
           else ($config.management.profile_models[$id].responses // $upstream) end)
       } end
   ] + (if ($profiles | length) == 0 and ($entry.model // "") != ""
-       then [{profile: null, upstream: $entry.model, client: $entry.model}] else [] end)) as $bindings
+       then [{profile: null, upstream: $entry.model, client: $entry.model}] else [] end)) end) as $bindings
 | if ($bindings | length) == 0 then error("当前命令尚未配置可选模型，请先设置模型或专属模型路由") else . end
 | .models as $models
 | .models = [$bindings[] as $binding
@@ -36,6 +41,7 @@ $routing[0] as $config
       then error("Codex 目录缺少已配置模型的元数据：" + $binding.upstream)
       else $model end
     | .slug = $binding.client
+    | .display_name = (if ($binding.label // "") != "" then $binding.label else ($config.management.labels["model:" + $binding.upstream] // .display_name) end)
     | .service_tiers = ($defaults + ($model.service_tiers // []) + [
         $binding.profile
         | select(.standard.model == $binding.upstream and .fast.model == $binding.upstream and .standard.target == .fast.target)

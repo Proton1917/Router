@@ -516,6 +516,7 @@ fn launch_spec(path: &Path, name: &str, extra: &[String]) -> Result<LaunchSpec> 
     let (program, args) = if template.deferred {
         (program, args)
     } else {
+        let args = crate::command_models::adapt(path, name, args, &mut environment)?;
         crate::mods::wrap(path, name, program, args)?
     };
     Ok(LaunchSpec {
@@ -611,7 +612,7 @@ fn execute_client(
     let manager = control::management(&value)?;
     let entry = manager.commands.get(name).context("命令不存在")?;
     let template = &manager.templates[&entry.template];
-    let (environment, mut removed) = env_plan(&value, name, true)?;
+    let (mut environment, mut removed) = env_plan(&value, name, true)?;
     removed.extend([
         "ROUTER_EXECUTABLE".to_owned(),
         "ROUTER_COMMAND_NAME".to_owned(),
@@ -620,7 +621,8 @@ fn execute_client(
     if let Some(variable) = &template.deferred_model_env {
         removed.push(variable.clone());
     }
-    let (program, args) = crate::mods::wrap(path, name, program.to_owned(), args.to_vec())?;
+    let args = crate::command_models::adapt(path, name, args.to_vec(), &mut environment)?;
+    let (program, args) = crate::mods::wrap(path, name, program.to_owned(), args)?;
     if preview {
         let mut visible = template
             .capture_env
