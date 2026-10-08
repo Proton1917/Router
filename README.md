@@ -151,7 +151,7 @@ router config check
 
 新增命令在网页中填写名称、选择启动方式和模型后，应用修改会自动同步终端入口。模型的标准与 Fast 目标可通过“服务等级”选择上游标准、Priority 或 Flex 服务。启动方式的 `options` 可以声明选项名称、默认值和各选项对应的参数数组，网页自动生成下拉框；每个命令在自身 `options` 中保存所选值。例如 Codex 的启动服务等级通过该机制生成 `-c service_tier="fast"` 参数，运行时发送 `service_tier: "priority"`。
 
-启动命令卡片列出全部已绑定的模型及服务来源。在“编辑命令与模型”中可以添加、删除、排序或隐藏条目，为每项选择 API 后端、模型配置和显示名称，并从可见列表中选择默认启动模型。“自定义标准与 Fast 目标”会为该命令创建独立模型配置。显示名称留空时，按目标 API 模型读取 `management.labels["model:<模型 ID>"]`，未设置名称时显示 API 模型 ID。
+启动命令卡片列出全部已绑定的模型及服务来源。在“编辑命令与模型”中可以添加、删除、排序或隐藏条目，为每项选择 API 后端、模型配置和显示名称，并从可见列表中选择默认启动模型。“自定义标准与 Fast 目标”直接更新此条目独享的模型配置；配置被其他条目、客户端或手工路由使用时，为当前条目创建独立副本。更换或删除绑定后，页面清理该命令已脱离全部引用的模型配置。“模型配置”列表按应用后的命令、客户端和手工路由显示关联数量。显示名称留空时，按目标 API 模型读取 `management.labels["model:<模型 ID>"]`，未设置名称时显示 API 模型 ID。
 
 多模型列表保存在命令的 `model_bindings` 数组，每项包含 `id`、`model`、`profile`、可选的 `label`、`description`、`visible`、`aliases` 和 `route_ids`。`aliases` 用于启动器将已有名称规范化为当前客户端模型标识；`route_ids` 将指定的现有兼容路由关联到该模型配置，要求这些路由仅属于同一客户端上下文。Router 为各条目生成同时匹配客户端、命令请求头和模型标识的独立路由。压缩和子任务等特殊规则应位于启动方式的 `route_before` 之前。单模型 `profile` 与 `model_bindings` 不能同时设置。
 
@@ -160,6 +160,8 @@ Claude Code 启动方式通过 `model_adapter` 调用 `scripts/claude-model-cata
 `model_adapter` 的程序与参数使用 MiniJinja，还可引用 `config_path` 和 `config_directory`。安装脚本时，将 `claude-model-catalog.py` 与其他适配程序一同放入配置目录下的 `application/scripts/`，或在启动方式中填写实际路径。Rust 只处理通用模型绑定、作用范围校验和适配程序接口；模型名称、后端、别名和显示规则保存在配置与脚本中。
 
 运行 `python3 scripts/check-command-models.py /absolute/path/to/router.json` 可通过管理接口检查实际配置的重复应用、模型重复、隐藏默认模型和调整顺序等行为。该检查依赖 `requests`，只发送配置预览，不保存修改。
+
+运行 `node scripts/check-model-editing.mjs /absolute/path/to/router.json` 可通过同一管理接口检查独享配置编辑、共享配置副本、绑定删除与替换，以及应用后的关联路由数量。检查使用指定的实际配置，只发送预览，不保存修改。
 
 `scripts/codex-api.zsh` 从后端读取 Codex 模型目录，并合并启动方式的默认服务等级、后端目录元数据和同模型、同后端 Fast 目标中的服务等级。启动方式的环境变量 `ROUTER_CODEX_DEFAULT_SERVICE_TIERS` 接受包含 `id`、`name`、`description` 的 JSON 对象数组；OpenRouter 入口可将 `priority` 声明为所有目录模型的默认 Fast 服务等级。该规则也适用于后续新增的目录模型。该脚本依赖 Zsh（含 `zsh/system`）、jq 与 shasum，参数依次为 router 配置文件、目录保存位置、Codex 程序、provider 参数、`--` 和客户端参数。目录应位于仓库外；会话使用的临时文件在客户端退出时删除。API 客户端的会话内快捷命令由客户端自身决定。
 

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import './commands.css';
+import { customizeCommandProfile } from './model-ownership.js';
 
 export function modelLabel(config, item, profiles = config.profiles) {
   const model = profiles[item.profile]?.standard.model || item.model;
@@ -26,6 +27,7 @@ export function CommandList({ config, rows, edit, preview, remove, toggle, dirty
 export function CommandEditor({ editor, config, close, save, ui }) {
   const { Button, Field, Modal, JsonField } = ui;
   const [name, setName] = useState(editor.id);
+  const [editingKey] = useState(() => editor.id || `draft-${crypto.randomUUID()}`);
   const [value, setValue] = useState(structuredClone(editor.value));
   const [profiles, setProfiles] = useState({});
   const [error, setError] = useState('');
@@ -57,10 +59,9 @@ export function CommandEditor({ editor, config, close, save, ui }) {
   }
   function customize(index, modify) {
     const item = bindings[index];
-    const id = profiles[item.profile] ? item.profile : `command-model-${crypto.randomUUID().replaceAll('-','')}`;
-    const next = structuredClone(allProfiles[item.profile]);
-    modify(next);
-    setProfiles(old => ({...old,[id]:next}));
+    const editingConfig = {...config,profiles:allProfiles,management:{...config.management,commands:{...config.management.commands,[editingKey]:value}}};
+    const {id,profile} = customizeCommandProfile(editingConfig,editingKey,item.id,modify);
+    setProfiles(old => ({...old,[id]:profile}));
     update(index,{profile:id});
   }
   function destination(index, which) {
@@ -96,7 +97,7 @@ export function CommandEditor({ editor, config, close, save, ui }) {
         <header><div><span className="model-position">{String(index+1).padStart(2,'0')}</span><strong>{label(item)}</strong><small>{config.management.labels?.[`backend:${target?.target}`] || target?.target}</small></div><div className="model-item-actions"><button aria-label={`上移模型 ${index+1}`} disabled={index === 0} onClick={() => { const next = [...bindings]; [next[index-1],next[index]] = [next[index],next[index-1]]; set('model_bindings',next); }}>↑</button><button aria-label={`下移模型 ${index+1}`} disabled={index === bindings.length-1} onClick={() => { const next = [...bindings]; [next[index+1],next[index]] = [next[index],next[index+1]]; set('model_bindings',next); }}>↓</button><button className="delete-link" aria-label={`删除模型 ${index+1}`} onClick={() => setValue(old => ({...old,model:old.model === item.model ? null : old.model,model_bindings:old.model_bindings.filter(row => row.id !== item.id)}))}>删除</button></div></header>
         <div className="form-grid"><Field label={`模型 ${index+1} 的 API 后端`}><select value={target?.target || ''} onChange={event => { const found = eligible.find(([,profile]) => profile.standard.target === event.target.value); if (found) selectProfile(index,found[0]); else customize(index,next => { next.standard = {target:event.target.value,model:''}; delete next.fast; }); }}>{backends.map(id => <option key={id} value={id}>{config.management.labels?.[`backend:${id}`] || id}</option>)}</select></Field><Field label={`模型 ${index+1} 的模型配置`}><select value={item.profile} onChange={event => selectProfile(index,event.target.value)}>{eligible.filter(([,profile]) => profile.standard.target === target?.target).map(([id,profile]) => <option key={id} value={id}>{config.management.labels?.[`profile:${id}`] || profile.standard.model}</option>)}</select></Field><Field label={`模型 ${index+1} 的显示名称`} hint="留空时自动跟随当前 API 模型。"><input value={item.label || ''} placeholder={modelLabel(config,{...item,label:''},allProfiles)} onChange={event => update(index,{label:event.target.value})}/></Field><Field label={`模型 ${index+1} 的菜单说明`}><input value={item.description || ''} placeholder="自动显示模型与服务来源" onChange={event => update(index,{description:event.target.value})}/></Field></div>
         <div className="command-model-options"><label className="check-field"><input type="checkbox" checked={item.visible} onChange={event => update(index,{visible:event.target.checked})}/>在客户端菜单显示</label><span>Fast：{profile?.fast ? `${profile.fast.model || item.model} · ${profile.fast.target}` : '沿用标准目标'}</span></div>
-        <details className="advanced"><summary>自定义标准与 Fast 目标</summary><p className="muted">修改目标会为此命令保存独立模型配置。</p>{destination(index,'standard')}<label className="check-field"><input type="checkbox" checked={!!profile?.fast} onChange={event => customize(index,next => { if (event.target.checked) next.fast = structuredClone(next.standard); else delete next.fast; })}/>单独配置 Fast 目标</label>{profile?.fast && destination(index,'fast')}</details>
+        <details className="advanced"><summary>自定义标准与 Fast 目标</summary><p className="muted">独享配置直接更新；共享配置会生成此入口使用的独立副本。</p>{destination(index,'standard')}<label className="check-field"><input type="checkbox" checked={!!profile?.fast} onChange={event => customize(index,next => { if (event.target.checked) next.fast = structuredClone(next.standard); else delete next.fast; })}/>单独配置 Fast 目标</label>{profile?.fast && destination(index,'fast')}</details>
         <details className="advanced"><summary>客户端标识与兼容路由</summary><Field label={`模型 ${index+1} 的客户端标识`}><input value={item.model} onChange={event => update(index,{model:event.target.value})}/></Field><Field label={`模型 ${index+1} 的兼容名称`} hint="每行一个，保留已有会话所用的名称。"><textarea rows={2} value={(item.aliases || []).join('\n')} onChange={event => update(index,{aliases:event.target.value.split('\n').filter(Boolean)})}/></Field>{item.route_ids?.length > 0 && <p className="muted">同时更新 {item.route_ids.length} 条已关联的兼容路由。</p>}</details>
       </article>; })}
     </section>}
