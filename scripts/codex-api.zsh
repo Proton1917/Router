@@ -23,20 +23,22 @@ client_umask="$(umask)"
 umask 077
 catalog_source="$(mktemp "$catalog_directory/source.XXXXXXXX")"
 catalog_file=""
-trap 'rm -f -- "$catalog_source" "$catalog_file"' EXIT
+catalog_native=""
+trap 'rm -f -- "$catalog_source" "$catalog_file" "$catalog_native"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 catalog_file="$(mktemp "$catalog_directory/catalog.XXXXXXXX")"
 
 client_version="$(umask "$client_umask"; "$client_program" --version)"
-cache_id="$(printf '%s\0' "${routing_config:A}" "$command_name" | shasum -a 256)"
+cache_id="$(printf '%s\0' "${routing_config:A}" "$command_name" | shasum -a 512)"
 cache_id="${cache_id%% *}"
 catalog_cache="$catalog_directory/cache.$cache_id.json"
 fingerprint="$(
   { printf '%s\0' "$client_program" "$client_version" "${provider_args[@]}" \
       "${ROUTER_CODEX_DEFAULT_SERVICE_TIERS:-[]}" "${ROUTER_CODEX_CATALOG_MODEL_PATTERN:-}";
-    cat -- "$routing_config" "${0:A}" "${0:A:h}/codex-catalog.jq"; } | shasum -a 256
+    printf '%s\0' "${ROUTER_CODEX_CATALOG_PATH:-/v1/models}" "${ROUTER_CODEX_CATALOG_PYTHON:-python3}";
+    cat -- "$routing_config" "${0:A}" "${0:A:h}/codex-catalog.jq" "${0:A:h}/codex-model-source.py"; } | shasum -a 512
 )"
 fingerprint="${fingerprint%% *}"
 zmodload zsh/system
@@ -59,7 +61,9 @@ fi
 if [[ "$cache_valid" == true ]]; then
   jq -e '.catalog' "$catalog_cache" > "$catalog_file"
 else
-  (umask "$client_umask"; "$client_program" "${provider_args[@]}" debug models) > "$catalog_source"
+  catalog_native="$(mktemp "$catalog_directory/native.XXXXXXXX")"
+  (umask "$client_umask"; "$client_program" --no-daemon debug models --bundled) > "$catalog_native"
+  "${ROUTER_CODEX_CATALOG_PYTHON:-python3}" "${0:A:h}/codex-model-source.py" "$routing_config" "$command_name" "$catalog_native" > "$catalog_source"
   # 校验命令绑定与真实目录元数据后，原子保存精简目录。
   if ! jq --slurpfile routing "$routing_config" --arg command "$command_name" \
     --argjson defaults "${ROUTER_CODEX_DEFAULT_SERVICE_TIERS:-[]}" \

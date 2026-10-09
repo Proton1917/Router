@@ -169,7 +169,9 @@ Claude Code 启动方式通过 `model_adapter` 调用 `scripts/claude-model-cata
 
 运行 `node scripts/check-model-editing.mjs /absolute/path/to/router.json` 可通过同一管理接口检查独享配置编辑、共享配置副本、绑定删除与替换，以及应用后的关联路由数量。检查使用指定的实际配置，只发送预览，不保存修改。
 
-`scripts/codex-api.zsh` 从后端读取 Codex 模型目录，并合并启动方式的默认服务等级、后端目录元数据和同模型、同后端 Fast 目标中的服务等级。启动方式的环境变量 `ROUTER_CODEX_DEFAULT_SERVICE_TIERS` 接受包含 `id`、`name`、`description` 的 JSON 对象数组；OpenRouter 入口可将 `priority` 声明为所有目录模型的默认 Fast 服务等级。该规则也适用于后续新增的目录模型。该脚本依赖 Zsh（含 `zsh/system`）、jq 与 shasum，参数依次为 router 配置文件、目录保存位置、Codex 程序、provider 参数、`--` 和客户端参数。目录应位于仓库外；会话使用的临时文件在客户端退出时删除。API 客户端的会话内快捷命令由客户端自身决定。
+`scripts/codex-api.zsh` 调用 `codex-model-source.py`，按命令绑定从后端直接读取模型目录。该程序使用配置中的凭据来源查询后端，再用当前 Codex 的本机模型格式生成目录。后端提供真实模型 ID、名称、上下文长度和输入类型；原生模型保留对应的客户端基础说明，其他模型使用客户端的默认基础说明。后端目录须包含 `data` 数组、`context_length`、`architecture.input_modalities` 和 `supported_parameters`；OpenRouter 提供此格式。目录缺少配置模型或必要能力字段时，启动立即失败。
+
+启动器合并启动方式的默认服务等级和 Fast 目标中的服务等级。环境变量 `ROUTER_CODEX_DEFAULT_SERVICE_TIERS` 接受包含 `id`、`name`、`description` 的 JSON 对象数组；OpenRouter 入口可将 `priority` 声明为目录模型的默认 Fast 服务等级。`ROUTER_CODEX_CATALOG_PATH` 设置目录路径，默认为 `/v1/models`；`ROUTER_CODEX_CATALOG_PYTHON` 设置 Python 3 程序，默认为 `python3`。该流程依赖 Python 3 标准库、Zsh（含 `zsh/system`）、jq 与 shasum。启动脚本的参数依次为 router 配置文件、目录保存位置、Codex 程序、provider 参数、`--` 和客户端参数。目录应位于仓库外；会话使用的临时文件在客户端退出时删除。API 客户端的会话内快捷命令由客户端自身决定。
 
 每个启动命令保存一份已校验的精简模型目录，默认有效期为 300 秒。启动方式的环境变量 `ROUTER_CODEX_CATALOG_CACHE_SECONDS` 可调整有效期，设为 `0` 时每次启动都重新获取。配置、provider 参数、Codex 版本或目录适配脚本变化会立即使缓存失效。并发启动通过文件锁协调更新；失效目录必须重新获取并通过校验，失败时停止启动。缓存文件权限为 `0600`，只保存精简目录和校验信息；所有 Codex 调用均继承调用者原有的 `umask`。
 
