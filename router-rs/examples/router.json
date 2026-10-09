@@ -48,6 +48,7 @@
       "model_pointer": "/model",
       "speed_pointer": "/speed",
       "fast_value": "fast",
+      "speed_sources": [{"pointer": "/service_tier", "fast_values": ["priority", "fast", "ultrafast"], "contexts": ["responses-client"]}],
       "ignored_model_suffixes": []
     },
     "reasoning_policies": {},

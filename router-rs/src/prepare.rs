@@ -91,6 +91,13 @@ pub fn prepare(
                 crate::routing::set_json_pointer(&mut metadata, path, value)?;
             }
         }
+        for source in &config.runtime.selection.speed_sources {
+            if source.applies_to(context)
+                && let Some(value) = body.value_at(&source.pointer)?
+            {
+                crate::routing::set_json_pointer(&mut metadata, &source.pointer, value)?;
+            }
+        }
     }
     let markers = config
         .routes

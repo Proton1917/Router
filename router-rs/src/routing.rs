@@ -197,7 +197,19 @@ pub struct ValidationCase {
     pub headers: HashMap<String, String>,
     #[serde(default)]
     pub last_user_content: Option<String>,
+    #[serde(default)]
+    pub request_fields: HashMap<String, Value>,
     pub expected: ValidationExpected,
+}
+
+impl ValidationCase {
+    pub fn apply_request_fields(&self, body: &mut Value) -> Result<()> {
+        for (path, value) in &self.request_fields {
+            crate::runtime::validate_pointer(path)?;
+            set_json_pointer(body, path, value.clone())?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -405,6 +417,7 @@ impl RouterConfig {
             if let Some(speed) = &case.speed {
                 body["speed"] = Value::String(speed.clone());
             }
+            case.apply_request_fields(&mut body)?;
             if !self
                 .runtime
                 .clients
@@ -469,10 +482,7 @@ impl RouterConfig {
             .pointer(&self.runtime.selection.model_pointer)
             .and_then(Value::as_str)
             .unwrap_or_default();
-        let explicit_fast = body
-            .pointer(&self.runtime.selection.speed_pointer)
-            .and_then(Value::as_str)
-            .map(|speed| speed.eq_ignore_ascii_case(&self.runtime.selection.fast_value));
+        let explicit_fast = self.runtime.selection.requested_fast(context, body);
         let route = self
             .routes
             .iter()

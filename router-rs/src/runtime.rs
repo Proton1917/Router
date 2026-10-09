@@ -189,10 +189,48 @@ pub struct SelectionPolicy {
     pub model_pointer: String,
     pub speed_pointer: String,
     pub fast_value: String,
+    #[serde(default)]
+    pub speed_sources: Vec<SpeedSource>,
     pub ignored_model_suffixes: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpeedSource {
+    pub pointer: String,
+    pub fast_values: Vec<String>,
+    #[serde(default)]
+    pub contexts: Vec<String>,
+}
+
+impl SpeedSource {
+    pub fn applies_to(&self, context: &str) -> bool {
+        self.contexts.is_empty() || self.contexts.iter().any(|id| id == context)
+    }
+}
+
 impl SelectionPolicy {
+    pub fn requested_fast(&self, context: &str, body: &Value) -> Option<bool> {
+        body.pointer(&self.speed_pointer)
+            .and_then(Value::as_str)
+            .map(|speed| speed.eq_ignore_ascii_case(&self.fast_value))
+            .or_else(|| {
+                self.speed_sources.iter().find_map(|source| {
+                    if !source.applies_to(context) {
+                        return None;
+                    }
+                    body.pointer(&source.pointer)
+                        .and_then(Value::as_str)
+                        .map(|speed| {
+                            source
+                                .fast_values
+                                .iter()
+                                .any(|value| speed.eq_ignore_ascii_case(value))
+                        })
+                })
+            })
+    }
+
     pub fn model_ids_match(&self, left: &str, right: &str) -> bool {
         let normalize = |value: &str| {
             let value = value.to_ascii_lowercase();
@@ -428,6 +466,17 @@ impl RuntimeConfig {
         }
         validate_pointer(&self.selection.model_pointer)?;
         validate_pointer(&self.selection.speed_pointer)?;
+        for source in &self.selection.speed_sources {
+            validate_pointer(&source.pointer)?;
+            if source.fast_values.is_empty() || source.fast_values.iter().any(String::is_empty) {
+                bail!("speed source must declare nonempty fast values");
+            }
+            for context in &source.contexts {
+                if !self.clients.iter().any(|client| &client.id == context) {
+                    bail!("speed source references unknown client context {context}");
+                }
+            }
+        }
         if self.selection.fast_value.is_empty()
             || self
                 .selection
@@ -506,7 +555,7 @@ fn validate_header_value(value: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_pointer(value: &str) -> Result<()> {
+pub(crate) fn validate_pointer(value: &str) -> Result<()> {
     if !value.starts_with('/')
         || value == "/"
         || value.split('/').skip(1).any(|part| {

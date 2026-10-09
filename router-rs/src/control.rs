@@ -546,6 +546,7 @@ pub fn prepare_candidate(current: &Value, mut candidate: Value) -> Result<(Value
         if let Some(speed) = &case.speed {
             request["speed"] = Value::String(speed.clone());
         }
+        case.apply_request_fields(&mut request)?;
         let resolved = parsed.resolve(
             &case.context,
             &headers,

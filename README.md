@@ -151,6 +151,12 @@ router config check
 
 新增命令在网页中填写名称、选择启动方式和模型后，应用修改会自动同步终端入口。模型的标准与 Fast 目标可通过“服务等级”选择上游标准、Priority 或 Flex 服务。启动方式的 `options` 可以声明选项名称、默认值和各选项对应的参数数组，网页自动生成下拉框；每个命令在自身 `options` 中保存所选值。例如 Codex 的启动服务等级通过该机制生成 `-c service_tier="fast"` 参数，运行时发送 `service_tier: "priority"`。
 
+`runtime.selection.speed_pointer` 和 `fast_value` 定义主要速度字段。`speed_sources` 按顺序声明其他来源，每项包含 `pointer`、`fast_values` 和可选的客户端 `contexts`。主要字段中的显式值优先；主要字段缺失时，读取第一个适用于当前客户端且包含字符串值的来源。该值在 `fast_values` 中时选择此模型的 Fast 目标，其他字符串值选择标准目标；全部来源缺失时沿用该路由的设置规则。示例把 Responses 客户端的 `/service_tier` 中 `priority`、`fast` 和 `ultrafast` 映射为 Fast，字段与取值均由配置定义。
+
+运行 `python3 scripts/check-speed-sources.py /absolute/path/to/router.json <command>` 可向当前命令的真实接口发送路由预览请求，检查配置来源、标准选择和主要速度字段的优先顺序。该检查依赖 `requests`，不发送上游生成请求。
+
+Fast 是选择快速目标的客户端开关。快速目标可以指定独立 API 模型、后端、供应商和上游服务等级；命令编辑器的摘要显示其实际供应商。`validation_cases[].request_fields` 可按 JSON Pointer 设置额外请求字段，用于校验这些速度来源及其优先顺序。
+
 启动命令卡片列出全部已绑定的模型及服务来源。在“编辑命令与模型”中可以添加、删除、排序或隐藏条目，为每项选择 API 后端、模型配置和显示名称，并从可见列表中选择默认启动模型。“自定义标准与 Fast 目标”直接更新此条目独享的模型配置；配置被其他条目、客户端或手工路由使用时，为当前条目创建独立副本。更换或删除绑定后，页面清理该命令已脱离全部引用的模型配置。“模型配置”列表按应用后的命令、客户端和手工路由显示关联数量。显示名称留空时，按目标 API 模型读取 `management.labels["model:<模型 ID>"]`，未设置名称时显示 API 模型 ID。
 
 多模型列表保存在命令的 `model_bindings` 数组，每项包含 `id`、`model`、`profile`、可选的 `label`、`description`、`visible`、`aliases` 和 `route_ids`。`aliases` 用于启动器将已有名称规范化为当前客户端模型标识；`route_ids` 将指定的现有兼容路由关联到该模型配置，要求这些路由仅属于同一客户端上下文。Router 为各条目生成同时匹配客户端、命令请求头和模型标识的独立路由。压缩和子任务等特殊规则应位于启动方式的 `route_before` 之前。单模型 `profile` 与 `model_bindings` 不能同时设置。
@@ -169,7 +175,7 @@ Claude Code 启动方式通过 `model_adapter` 调用 `scripts/claude-model-cata
 
 `router run` 向启动程序提供 `ROUTER_COMMAND_NAME`。设置 `model_bindings` 时，Codex 目录只保留该列表中的可见条目；其余命令使用单模型绑定和带该命令标记的专属路由。名单来自配置，保留上游返回的能力信息。直接调用适配脚本时需设置同名环境变量。修改命令绑定或专属路由后，重新启动客户端即可读取新的模型列表。
 
-`ROUTER_CODEX_CATALOG_MODEL_PATTERN` 可声明后端模型名称需要匹配的正则表达式。OpenRouter 入口可使用 `/` 检查带命名空间的模型 ID；目录不符合要求或缺少已配置模型时启动立即失败。Fast 表示请求上游 `priority` 服务等级，实际使用的服务等级以 OpenRouter 响应为准。
+`ROUTER_CODEX_CATALOG_MODEL_PATTERN` 可声明后端模型名称需要匹配的正则表达式。OpenRouter 入口可使用 `/` 检查带命名空间的模型 ID；目录不符合要求或缺少已配置模型时启动立即失败。Codex 的 Fast 开关发送 `priority`，Router 按速度来源配置选择模型的 Fast 目标，并应用其中的供应商和字段策略。实际上游服务等级以响应为准。
 
 修改先进入浏览器草稿，应用前校验配置结构、引用关系和路由用例，并展示受影响的用例。保存使用文件锁、版本摘要和原子替换，过期版本会被拒绝。命令绑定生成带有独立请求头的路由；启动模型名称可以按协议配置在 `management.profile_models` 中，后端协议声明由 `management.backend_protocols` 保存。
 

@@ -1824,6 +1824,7 @@ mod tests {
                     .expect("request messages")
                     .push(serde_json::json!({"role": "user", "content": content}));
             }
+            case.apply_request_fields(&mut request).unwrap();
             let headers = case
                 .headers
                 .iter()
