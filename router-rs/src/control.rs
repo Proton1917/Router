@@ -72,6 +72,8 @@ pub struct LaunchTemplate {
     pub route_before: Option<String>,
     #[serde(default)]
     pub model_adapter: Option<ProcessSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window_range: Option<crate::routing::TokenRange>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -228,6 +230,16 @@ impl Management {
         }
         for (name, template) in &self.templates {
             validate_name(name)?;
+            if let Some(range) = template.context_window_range {
+                ensure!(
+                    range.min > 0 && range.min <= range.max,
+                    "启动方式 {name} 的上下文范围无效"
+                );
+                ensure!(
+                    template.model_adapter.is_some(),
+                    "启动方式 {name} 的上下文设置需要模型适配程序"
+                );
+            }
             for (id, option) in &template.options {
                 validate_name(id)?;
                 ensure!(

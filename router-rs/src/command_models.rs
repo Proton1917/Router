@@ -28,6 +28,8 @@ pub struct ModelBinding {
     pub aliases: Vec<String>,
     #[serde(default)]
     pub route_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
 }
 
 fn visible() -> bool {
@@ -55,6 +57,18 @@ pub fn validate(name: &str, command: &CommandSpec, template: &LaunchTemplate) ->
     let mut linked = BTreeSet::new();
     for binding in &command.model_bindings {
         control::validate_name(&binding.id)?;
+        if let Some(window) = binding.context_window {
+            let range = template
+                .context_window_range
+                .context("启动方式未声明逐模型上下文设置")?;
+            ensure!(
+                window >= range.min && window <= range.max,
+                "命令 {name} 的模型 {} 上下文预算需在 {}～{} tokens 之间",
+                binding.id,
+                range.min,
+                range.max
+            );
+        }
         ensure!(ids.insert(&binding.id), "命令 {name} 的模型条目标识重复");
         for model in std::iter::once(&binding.model).chain(&binding.aliases) {
             ensure!(

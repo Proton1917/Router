@@ -17,12 +17,13 @@
       "description": "通过网关调用兼容 Messages 的后端。",
       "program": "claude",
       "model_adapter": {"program":"python3", "args":["{{ config_directory }}/application/scripts/claude-model-catalog.py"]},
+      "context_window_range": {"min":100000,"max":1000000},
       "args": [],
       "model_flags": ["--model"],
       "header_env": "ANTHROPIC_CUSTOM_HEADERS",
       "request_path": "/v1/messages",
       "route_before": "messages",
-      "env": {"ANTHROPIC_BASE_URL": "{{ gateway_url }}", "ANTHROPIC_AUTH_TOKEN": "local-router", "ANTHROPIC_API_KEY": ""}
+      "env": {"ANTHROPIC_BASE_URL": "{{ gateway_url }}", "ANTHROPIC_AUTH_TOKEN": "local-router", "ANTHROPIC_API_KEY": "", "CLAUDE_CODE_MAX_CONTEXT_TOKENS":"200000"}
     },
     "responses-client": {
       "label": "Codex API",

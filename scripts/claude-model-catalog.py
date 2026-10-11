@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from pathlib import Path
 import sys
 
@@ -37,6 +38,29 @@ def prepare(request):
             args.append(arg)
     options = []
     environment = dict(settings.get("env", {}))
+    context_bindings = [item for item in bindings if item.get("context_window") is not None]
+    if context_bindings:
+        limits = config["management"]["templates"][entry["template"]]["context_window_range"]
+        for item in context_bindings:
+            window = item["context_window"]
+            if isinstance(window, bool) or not isinstance(window, int) or not limits["min"] <= window <= limits["max"]:
+                raise ValueError("模型上下文预算超出启动方式允许的范围")
+        previous_max = int(environment.get("CLAUDE_CODE_MAX_CONTEXT_TOKENS", os.environ.get("CLAUDE_CODE_MAX_CONTEXT_TOKENS", limits["min"])))
+        previous_compact = environment.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW", os.environ.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW", ""))
+        previous_compact = int(previous_compact) if previous_compact else previous_max
+        environment["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = str(max(previous_max, *(item["context_window"] for item in context_bindings)))
+        environment["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = ""
+        settings["autoCompactWindow"] = previous_compact
+        model_settings = settings.setdefault("modelSettings", {})
+        for item in bindings:
+            window = item.get("context_window")
+            if window is None:
+                window = limits["max"] if re.search(r"\[1m\]$", item["model"], re.I) else min(previous_compact, previous_max)
+            for spelling in [item["model"], *item.get("aliases", [])]:
+                key = re.sub(r"\[1m\]", "", spelling, flags=re.I)
+                row = model_settings.setdefault(key, {})
+                if item.get("context_window") is not None or "autoCompactWindow" not in row:
+                    row["autoCompactWindow"] = window
     model_labels = {}
     capabilities = [environment.get("CLAUDE_CODE_MODEL_CAPABILITIES", os.environ.get("CLAUDE_CODE_MODEL_CAPABILITIES", ""))]
     for item in bindings:
