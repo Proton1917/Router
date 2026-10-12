@@ -8,6 +8,7 @@
   "scripts/client-integrations.py": "scripts/client-integrations.py",
   "scripts/claude-mods.py": "scripts/claude-mods.py",
   "scripts/claude-model-catalog.py": "scripts/claude-model-catalog.py",
+  "scripts/model-context.py": "scripts/model-context.py",
   "scripts/codex-api.zsh": "scripts/codex-api.zsh",
   "scripts/codex-catalog.jq": "scripts/codex-catalog.jq",
   "scripts/codex-model-source.py": "scripts/codex-model-source.py",

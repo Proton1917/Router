@@ -265,7 +265,8 @@ pub fn adapt(
         .stderr(Stdio::piped())
         .spawn()
         .context("无法启动模型菜单适配程序")?;
-    let input = json!({"config":value,"command_name":name,"args":args});
+    let input =
+        json!({"config":value,"config_directory":path.parent(),"command_name":name,"args":args});
     child
         .stdin
         .take()

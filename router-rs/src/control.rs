@@ -167,10 +167,18 @@ pub struct Management {
     pub integrations: BTreeMap<String, crate::integrations::Integration>,
     #[serde(default)]
     pub mods: Option<crate::mods::ModConfig>,
+    #[serde(default)]
+    pub context_discovery: Option<crate::context_limits::ContextDiscovery>,
 }
 
 impl Management {
     pub fn validate(&self) -> Result<()> {
+        if let Some(discovery) = &self.context_discovery {
+            ensure!(
+                !discovery.adapter.program.trim().is_empty(),
+                "上下文目录适配程序不能为空"
+            );
+        }
         if let Some(mods) = &self.mods {
             mods.validate()?;
         }
@@ -612,6 +620,7 @@ pub fn save_candidate(path: &Path, expected_revision: &str, candidate: Value) ->
         "配置已被其他窗口或程序修改，请刷新后重新应用"
     );
     let (candidate, changes) = prepare_candidate(&current, candidate)?;
+    crate::context_limits::validate(path, &candidate)?;
     write_json(path, &candidate)?;
     Ok(json!({"revision":revision(&candidate)?,"config":candidate,"validation_changes":changes}))
 }
@@ -814,6 +823,11 @@ async fn preview(
         return Err(anyhow::anyhow!("配置已变更，请刷新后重新应用").into());
     }
     let (config, changes) = prepare_candidate(&current, request.config)?;
+    let checked = config.clone();
+    let path = state.path.clone();
+    tokio::task::spawn_blocking(move || crate::context_limits::validate(&path, &checked))
+        .await
+        .map_err(anyhow::Error::from)??;
     Ok(Json(json!({"config":config,"validation_changes":changes})))
 }
 
@@ -822,11 +836,44 @@ async fn apply(
     Json(request): Json<ConfigWrite>,
 ) -> Result<Json<Value>, ApiError> {
     let _guard = state.lock.lock().await;
-    Ok(Json(save_candidate(
-        &state.path,
-        &request.revision,
-        request.config,
-    )?))
+    let path = state.path.clone();
+    Ok(Json(
+        tokio::task::spawn_blocking(move || {
+            save_candidate(&path, &request.revision, request.config)
+        })
+        .await
+        .map_err(anyhow::Error::from)??,
+    ))
+}
+
+#[derive(Deserialize)]
+struct ContextQuery {
+    config: Value,
+    command_name: String,
+    #[serde(default)]
+    refresh: bool,
+}
+
+async fn model_context(
+    State(state): State<ControlState>,
+    Json(mut request): Json<ContextQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let current = load_value(&state.path)?;
+    request.config["management"]["context_discovery"] =
+        current["management"]["context_discovery"].clone();
+    let path = state.path.clone();
+    Ok(Json(
+        tokio::task::spawn_blocking(move || {
+            crate::context_limits::discover(
+                &path,
+                &request.config,
+                Some(&request.command_name),
+                request.refresh,
+            )
+        })
+        .await
+        .map_err(anyhow::Error::from)??,
+    ))
 }
 
 #[derive(Deserialize)]
@@ -1036,6 +1083,7 @@ pub async fn bind(
         .route("/commands/install", post(install))
         .route("/commands/preview", post(launch_preview))
         .route("/backends/probe", post(backend_probe))
+        .route("/models/context", post(model_context))
         .route("/integrations/action", post(integration_action))
         .route("/mods/action", post(mod_action))
         .route("/service/restart", post(restart))

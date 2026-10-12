@@ -9,6 +9,10 @@
   "browser": {"program": "open", "args": ["-a", "Safari", "{{ url }}"]},
   "command_header": "x-router-command",
   "max_request_bytes": 16777216,
+  "context_discovery": {
+    "adapter": {"program":"python3", "args":["{{ config_directory }}/application/scripts/model-context.py"]},
+    "settings": {"cache_directory":"client-state/model-context", "ttl_seconds":21600, "timeout_seconds":15, "sources":{}}
+  },
   "backend_protocols": {"messages": ["messages"], "responses": ["responses"]},
   "templates": {
     "messages-client": {

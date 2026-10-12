@@ -3,6 +3,8 @@ import os
 import re
 from pathlib import Path
 import sys
+from importlib.util import module_from_spec, spec_from_file_location
+from email.parser import Parser
 
 
 def merge(left, right):
@@ -39,7 +41,19 @@ def prepare(request):
     options = []
     environment = dict(settings.get("env", {}))
     context_bindings = [item for item in bindings if item.get("context_window") is not None]
-    if context_bindings:
+    discovered = {}
+    limits = config['management']['templates'][entry['template']].get('context_window_range')
+    if limits and config['management'].get('context_discovery'):
+        module = spec_from_file_location('model_context', Path(__file__).with_name('model-context.py'))
+        discovery = module_from_spec(module)
+        module.loader.exec_module(discovery)
+        header_env = config['management']['templates'][entry['template']].get('header_env')
+        header_text = environment.get(header_env, os.environ.get(header_env, '')) if header_env else ''
+        headers = dict(Parser().parsestr(header_text).items())
+        discovered = discovery.discover({**request, 'headers':headers})['commands'][request['command_name']]
+        for item in bindings:
+            discovery.validate_budget(request['command_name'], item, discovered[item['id']])
+    if context_bindings or any(item['max_tokens'] is not None for item in discovered.values()):
         limits = config["management"]["templates"][entry["template"]]["context_window_range"]
         for item in context_bindings:
             window = item["context_window"]
@@ -48,7 +62,7 @@ def prepare(request):
         previous_max = int(environment.get("CLAUDE_CODE_MAX_CONTEXT_TOKENS", os.environ.get("CLAUDE_CODE_MAX_CONTEXT_TOKENS", limits["min"])))
         previous_compact = environment.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW", os.environ.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW", ""))
         previous_compact = int(previous_compact) if previous_compact else previous_max
-        environment["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = str(max(previous_max, *(item["context_window"] for item in context_bindings)))
+        environment["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = str(max([previous_max, *(item["context_window"] for item in context_bindings)]))
         environment["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = ""
         settings["autoCompactWindow"] = previous_compact
         model_settings = settings.setdefault("modelSettings", {})
@@ -56,11 +70,14 @@ def prepare(request):
             window = item.get("context_window")
             if window is None:
                 window = limits["max"] if re.search(r"\[1m\]$", item["model"], re.I) else min(previous_compact, previous_max)
+            maximum = discovered.get(item['id'], {}).get('max_tokens')
+            if maximum is not None:
+                window = min(window, maximum)
             for spelling in [item["model"], *item.get("aliases", [])]:
                 key = re.sub(r"\[1m\]", "", spelling, flags=re.I)
                 row = model_settings.setdefault(key, {})
-                if item.get("context_window") is not None or "autoCompactWindow" not in row:
-                    row["autoCompactWindow"] = window
+                existing = row.get('autoCompactWindow', window)
+                row["autoCompactWindow"] = window if item.get("context_window") is not None else min(existing, window)
     model_labels = {}
     capabilities = [environment.get("CLAUDE_CODE_MODEL_CAPABILITIES", os.environ.get("CLAUDE_CODE_MODEL_CAPABILITIES", ""))]
     for item in bindings:

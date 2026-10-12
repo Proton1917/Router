@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import './commands.css';
 import { customizeCommandProfile } from './model-ownership.js';
 
@@ -24,7 +24,7 @@ export function CommandList({ config, rows, edit, preview, remove, toggle, dirty
   })}</div>;
 }
 
-export function CommandEditor({ editor, config, close, save, ui }) {
+export function CommandEditor({ editor, config, close, save, ui, api }) {
   const { Button, Field, Modal, JsonField } = ui;
   const [name, setName] = useState(editor.id);
   const [editingKey] = useState(() => editor.id || `draft-${crypto.randomUUID()}`);
@@ -32,12 +32,43 @@ export function CommandEditor({ editor, config, close, save, ui }) {
   const [profiles, setProfiles] = useState({});
   const [error, setError] = useState('');
   const [invalid, setInvalid] = useState({});
+  const [contextLimits, setContextLimits] = useState({});
+  const [loadingLimits, setLoadingLimits] = useState(false);
+  const [limitsError, setLimitsError] = useState('');
+  const discoveryRequest = useRef(0);
   const template = config.management.templates[value.template];
   const protocol = config.runtime.server.endpoints[template?.request_path];
   const allProfiles = {...config.profiles,...profiles};
   const eligible = Object.entries(allProfiles).filter(([, profile]) => profile.standard.model && (!config.management.backend_protocols?.[profile.standard.target] || config.management.backend_protocols[profile.standard.target].includes(protocol)));
   const backends = Object.keys(config.runtime.backends).filter(key => !config.management.backend_protocols?.[key] || config.management.backend_protocols[key].includes(protocol));
   const bindings = value.model_bindings || [];
+  const discoveryEnabled = !!(config.management.context_discovery && template?.context_window_range);
+  const contextSignature = JSON.stringify([value.template,config.management.context_discovery,bindings.map(item => [item.id,allProfiles[item.profile]?.standard,allProfiles[item.profile]?.fast]),Object.entries(config.runtime.backends).map(([id,backend]) => [id,backend.base_url])]);
+  async function loadContextLimits(refresh = false) {
+    const requestId = ++discoveryRequest.current;
+    setLoadingLimits(true); setLimitsError(''); setContextLimits({});
+    try {
+      const candidate = {...config,profiles:allProfiles,management:{...config.management,commands:{...config.management.commands,[editingKey]:value}}};
+      const result = await api('models/context',{config:candidate,command_name:editingKey,refresh});
+      if (discoveryRequest.current === requestId) setContextLimits(result.commands[editingKey] || {});
+    } catch (error) { if (discoveryRequest.current === requestId) setLimitsError(error.message); }
+    finally { if (discoveryRequest.current === requestId) setLoadingLimits(false); }
+  }
+  useEffect(() => {
+    setContextLimits({});
+    if (!discoveryEnabled) return;
+    setLoadingLimits(true);
+    const timer = setTimeout(() => loadContextLimits(),250);
+    return () => { clearTimeout(timer); discoveryRequest.current++; };
+  },[contextSignature,discoveryEnabled]);
+  function contextMaximum(item) { return Math.min(template.context_window_range.max,contextLimits[item.id]?.max_tokens ?? Infinity); }
+  function contextHint(item) {
+    const maximum = contextMaximum(item);
+    const entry = contextLimits[item.id];
+    const detail = loadingLimits ? '正在读取后端模型与供应商上限。' : limitsError ? limitsError : entry?.destinations.map(row => `${row.speed === 'fast' ? 'Fast' : '标准'}：${row.max_tokens == null ? row.error || row.message || '上限未知' : `${row.max_tokens.toLocaleString()} tokens`}${row.provider ? ` · ${row.provider}` : ''}${row.resolved_models ? ` · ${row.resolved_models.join('、')}` : ''}`).join('；');
+    if (maximum < template.context_window_range.min) return `${detail} 后端上限低于此启动方式的最小可填写预算，请留空，启动时自动使用已识别上限。`;
+    return `${detail || ''} ${entry?.complete ? '已按全部目标限制预算。' : discoveryEnabled && !loadingLimits ? '未公布数值的目标，其最大窗口仍未知。' : ''} 可填写 ${template.context_window_range.min.toLocaleString()}～${maximum.toLocaleString()} tokens。留空沿用启动器基线，并受已识别上限限制；修改后重新启动命令。`;
+  }
   const set = (key, next) => setValue(old => ({...old,[key]:next}));
   const label = item => modelLabel(config,item,allProfiles);
   function update(index, changes) { setValue(old => ({...old,model_bindings:old.model_bindings.map((item,at) => at === index ? {...item,...changes} : item)})); }
@@ -84,6 +115,12 @@ export function CommandEditor({ editor, config, close, save, ui }) {
       for (const item of bindings) {
         if (!item.model.trim() || !allProfiles[item.profile]) throw new Error('请完整设置每个模型条目。');
         if (item.context_window != null && (!template.context_window_range || !Number.isSafeInteger(item.context_window) || item.context_window < template.context_window_range.min || item.context_window > template.context_window_range.max)) throw new Error('请在启动方式允许的范围内填写上下文预算。');
+        if (item.context_window != null && discoveryEnabled) {
+          if (loadingLimits || !contextLimits[item.id]) throw new Error(limitsError || '请等待模型上下文上限读取完成。');
+          const failed = contextLimits[item.id].destinations.find(row => row.error);
+          if (failed) throw new Error(failed.error);
+          if (item.context_window > contextMaximum(item)) throw new Error(`${label(item)} 的上下文预算不能超过 ${contextMaximum(item).toLocaleString()} tokens。`);
+        }
         for (const id of [item.model,...(item.aliases || [])]) { if (ids.has(id.toLowerCase())) throw new Error(`模型标识重复：${id}`); ids.add(id.toLowerCase()); }
       }
       if (bindings.length && value.model && !bindings.some(item => item.visible && item.model === value.model)) throw new Error('默认模型需要在可见列表中。');
@@ -92,13 +129,13 @@ export function CommandEditor({ editor, config, close, save, ui }) {
   }
   return <Modal title={editor.fresh ? '新增启动命令' : `${name} · 命令与模型`} eyebrow="启动命令" close={close} wide footer={<><span className="footer-note">路由应用后生效；菜单在下次启动时读取</span><Button onClick={close}>取消</Button><Button primary onClick={submit}>保存草稿</Button></>}>
     <div className="form-grid"><Field label="命令名称"><input value={name} onChange={event => setName(event.target.value)}/></Field><Field label="显示说明"><input value={value.label || ''} onChange={event => set('label',event.target.value)}/></Field><Field label="启动方式"><select value={value.template} onChange={event => setValue(old => ({...old,template:event.target.value,options:{},mod_profile:config.management.templates[event.target.value]?.supports_mods ? old.mod_profile : undefined}))}>{Object.entries(config.management.templates).map(([id,template]) => <option key={id} value={id}>{template.label}</option>)}</select></Field><Field label="默认启动模型" hint="跟随启动器时，保留此命令的现有默认选择。">{bindings.length ? <select value={value.model || ''} onChange={event => set('model',event.target.value || null)}><option value="">跟随客户端或启动器</option>{bindings.filter(item => item.visible).map(item => <option key={item.id} value={item.model}>{label(item)}</option>)}</select> : <input value={value.model || ''} onChange={event => set('model',event.target.value || null)} placeholder="跟随客户端或启动器"/>}</Field></div>
-    {template?.request_path && <section className="command-model-editor"><header><div><h3>可选模型 <span>{bindings.length}</span></h3><p>显示名称留空时跟随后端模型。菜单、切换提示与状态名称使用同一份配置。</p></div><Button onClick={add}>＋ 添加模型</Button></header>
+    {template?.request_path && <section className="command-model-editor"><header><div><h3>可选模型 <span>{bindings.length}</span></h3><p>显示名称留空时跟随后端模型。菜单、切换提示与状态名称使用同一份配置。</p></div><div>{discoveryEnabled && <Button disabled={loadingLimits} onClick={() => loadContextLimits(true)}>刷新模型上限</Button>}<Button onClick={add}>＋ 添加模型</Button></div></header>
       {!bindings.length && <div className="callout">{value.profile ? `当前绑定：${config.management.labels?.[`profile:${value.profile}`] || value.profile}。` : '当前沿用现有路由规则。'}<Button onClick={() => { if (value.profile) setValue(old => ({...old,profile:null,match_all_models:false,model_bindings:[{id:'primary',profile:old.profile,model:old.model || config.management.profile_models?.[old.profile]?.[protocol] || allProfiles[old.profile].standard.model,label:'',description:'',visible:true,aliases:[],route_ids:[]}]})); else add(); }}>管理模型列表</Button></div>}
       {bindings.map((item,index) => { const profile = allProfiles[item.profile]; const target = profile?.standard; return <article className="command-model-item" key={item.id}>
         <header><div><span className="model-position">{String(index+1).padStart(2,'0')}</span><strong>{label(item)}</strong><small>{config.management.labels?.[`backend:${target?.target}`] || target?.target}</small></div><div className="model-item-actions"><button aria-label={`上移模型 ${index+1}`} disabled={index === 0} onClick={() => { const next = [...bindings]; [next[index-1],next[index]] = [next[index],next[index-1]]; set('model_bindings',next); }}>↑</button><button aria-label={`下移模型 ${index+1}`} disabled={index === bindings.length-1} onClick={() => { const next = [...bindings]; [next[index+1],next[index]] = [next[index],next[index+1]]; set('model_bindings',next); }}>↓</button><button className="delete-link" aria-label={`删除模型 ${index+1}`} onClick={() => setValue(old => ({...old,model:old.model === item.model ? null : old.model,model_bindings:old.model_bindings.filter(row => row.id !== item.id)}))}>删除</button></div></header>
         <div className="form-grid"><Field label={`模型 ${index+1} 的 API 后端`}><select value={target?.target || ''} onChange={event => { const found = eligible.find(([,profile]) => profile.standard.target === event.target.value); if (found) selectProfile(index,found[0]); else customize(index,next => { next.standard = {target:event.target.value,model:''}; delete next.fast; }); }}>{backends.map(id => <option key={id} value={id}>{config.management.labels?.[`backend:${id}`] || id}</option>)}</select></Field><Field label={`模型 ${index+1} 的模型配置`}><select value={item.profile} onChange={event => selectProfile(index,event.target.value)}>{eligible.filter(([,profile]) => profile.standard.target === target?.target).map(([id,profile]) => <option key={id} value={id}>{config.management.labels?.[`profile:${id}`] || profile.standard.model}</option>)}</select></Field><Field label={`模型 ${index+1} 的显示名称`} hint="留空时自动跟随当前 API 模型。"><input value={item.label || ''} placeholder={modelLabel(config,{...item,label:''},allProfiles)} onChange={event => update(index,{label:event.target.value})}/></Field><Field label={`模型 ${index+1} 的菜单说明`}><input value={item.description || ''} placeholder="自动显示模型与服务来源" onChange={event => update(index,{description:event.target.value})}/></Field></div>
         <div className="command-model-options"><label className="check-field"><input type="checkbox" checked={item.visible} onChange={event => update(index,{visible:event.target.checked})}/>在客户端菜单显示</label><span>Fast：{profile?.fast ? [profile.fast.model || item.model,config.management.labels?.[`backend:${profile.fast.target}`] || profile.fast.target,profile.fast.provider].filter(Boolean).join(' · ') : '沿用标准目标'}</span></div>
-        {template.context_window_range && <Field label={`模型 ${index+1} 的上下文预算（tokens）`} hint={`范围 ${template.context_window_range.min.toLocaleString()}～${template.context_window_range.max.toLocaleString()}。按此预算自动压缩历史，切换模型时使用各自的值；留空沿用启动器基线，修改后重新启动命令。`}><input type="number" min={template.context_window_range.min} max={template.context_window_range.max} step="1" value={item.context_window ?? ''} placeholder="沿用启动器基线" onChange={event => update(index,{context_window:event.target.value === '' ? null : Number(event.target.value)})}/></Field>}
+        {template.context_window_range && <Field label={`模型 ${index+1} 的上下文预算（tokens）`} hint={contextHint(item)}><input type="number" min={template.context_window_range.min} max={contextMaximum(item)} step="1" value={item.context_window ?? ''} placeholder="沿用启动器基线" onChange={event => update(index,{context_window:event.target.value === '' ? null : Number(event.target.value)})}/></Field>}
         <details className="advanced"><summary>自定义标准与 Fast 目标</summary><p className="muted">独享配置直接更新；共享配置会生成此入口使用的独立副本。</p>{destination(index,'standard')}<label className="check-field"><input type="checkbox" checked={!!profile?.fast} onChange={event => customize(index,next => { if (event.target.checked) next.fast = structuredClone(next.standard); else delete next.fast; })}/>单独配置 Fast 目标</label>{profile?.fast && destination(index,'fast')}</details>
         <details className="advanced"><summary>客户端标识与兼容路由</summary><Field label={`模型 ${index+1} 的客户端标识`}><input value={item.model} onChange={event => update(index,{model:event.target.value})}/></Field><Field label={`模型 ${index+1} 的兼容名称`} hint="每行一个，保留已有会话所用的名称。"><textarea rows={2} value={(item.aliases || []).join('\n')} onChange={event => update(index,{aliases:event.target.value.split('\n').filter(Boolean)})}/></Field>{item.route_ids?.length > 0 && <p className="muted">同时更新 {item.route_ids.length} 条已关联的兼容路由。</p>}</details>
       </article>; })}
