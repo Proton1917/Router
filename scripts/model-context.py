@@ -112,7 +112,9 @@ class Discovery:
             raise ValueError('模型目录没有返回配置的模型数组：' + target)
         matches = [row for row in rows if row.get(source['id']) == model]
         if not matches:
-            return {**base, 'message': '后端模型目录未收录此 API 标识'}
+            result = {**base, 'message': '后端模型目录未收录此 API 标识', 'checked_at':int(time.time()), 'source':self.config['runtime']['backends'][target]['base_url'].rstrip('/') + source['path']}
+            self.save(cache, result)
+            return result
         if len(matches) > 1:
             raise ValueError('模型目录的配置模型标识重复：' + model)
         window = at(matches[0], source['context'])
