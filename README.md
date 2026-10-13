@@ -161,6 +161,8 @@ Claude Code API 启动方式通过 `options.router-speed` 提供“Fast 控制�
 
 `claude-model-catalog.py` 在客户端控制模式下启用原生 Fast 能力，由客户端发送 `speed`；固定模式将所选等级合并到 `CLAUDE_CODE_EXTRA_BODY.speed` 并关闭原生开关。两种模式均保留其他附加请求字段。自动登录启动方式通过 `api_gate` 将此适配限制在 API 模式。
 
+客户端控制模式为全部绑定模型及兼容名称声明 Fast 能力，能力标识按客户端规范去掉 `[1m]` 后缀。开启 `/fast` 保留当前模型；模型未配置快速目标时沿用标准目标。
+
 `runtime.clients[].response_errors` 提供按请求头限定的错误状态转换。示例仅对携带 `x-router-fast-control: client` 的客户端将上游 429 返回为 503，并通过 `x-router-upstream-status: 429` 保留原始状态；错误正文和 `Retry-After` 等响应头原样传递，日志同时记录上下游状态。Claude Code 因此执行普通错误重试，保留当前 Fast 线路。真实上游限额仍然生效，重试达到客户端上限后报错。原生 `/fast` 中的 Opus 价格文案仍由客户端提供，实际模型和计费以所选后端为准。错误映射只能将 400～599 转为另一个错误状态，不能转换为成功。
 
 已有 Claude Code Fast 别名恢复规则的部署，可在此启动方式的 `request_headers` 添加独立标记，并用恢复规则的 `match.absent_headers` 区分请求。独立模式按实际模型标识路由，状态栏读取 `ROUTER_MODEL_LABELS`，无需通过共享设置恢复选中模型；该内部标记应加入 `runtime.strip_request_headers`。

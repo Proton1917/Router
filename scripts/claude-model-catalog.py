@@ -120,8 +120,9 @@ def prepare(request):
         description = item.get("description") or label + " · " + labels.get("backend:" + backend, backend)
         for spelling in [item["model"], *item.get("aliases", [])]:
             model_labels[spelling] = label
-        if (not speed_option or router_speed == "client") and profile.get("fast"):
-            capabilities.append(item["model"] + "=fast_mode")
+        if router_speed == "client" or not speed_option and profile.get("fast"):
+            for spelling in [item["model"], *item.get("aliases", [])]:
+                capabilities.append(re.sub(r"\[1m\]", "", spelling, flags=re.I) + "=fast_mode")
         if item.get("visible", True):
             options.append({"model": item["model"], "label": label, "description": description})
         for key in ("ANTHROPIC_DEFAULT_MODEL", "ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_CUSTOM_MODEL_OPTION"):

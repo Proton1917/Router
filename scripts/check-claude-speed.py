@@ -49,6 +49,10 @@ for speed in ("standard", "fast"):
         assert prepared["env"]["CLAUDE_CODE_DISABLE_FAST_MODE"] == "0"
         assert settings["fastMode"] == (speed == "fast")
         assert adapted_headers["x-router-fast-control"] == "client"
+        for binding in entry["model_bindings"]:
+            for spelling in [binding["model"], *binding.get("aliases", [])]:
+                canonical = re.sub(r"\[1m\]", "", spelling, flags=re.I)
+                assert canonical + "=fast_mode" in prepared["env"]["CLAUDE_CODE_MODEL_CAPABILITIES"]
         extra["speed"] = speed
     else:
         assert extra["speed"] == speed
