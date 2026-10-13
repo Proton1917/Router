@@ -2,8 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import './commands.css';
 import { customizeCommandProfile } from './model-ownership.js';
 
-export function modelLabel(config, item, profiles = config.profiles) {
-  const model = profiles[item.profile]?.standard.model || item.model;
+export function modelLabel(config, item, profiles = config.profiles, speed = 'standard') {
+  const profile = profiles[item.profile];
+  const target = speed === 'fast' ? profile?.fast || profile?.standard : profile?.standard;
+  const model = target?.model || item.model;
   return item.label || config.management.labels?.[`model:${model}`] || model;
 }
 
@@ -11,13 +13,16 @@ export function CommandList({ config, rows, edit, preview, remove, toggle, dirty
   const { Button } = ui;
   return <div className="command-grid">{rows.map(([name, command]) => {
     const template = config.management.templates[command.template];
+    const speedOption = command.model_bindings?.length ? template?.options?.['router-speed'] : undefined;
+    const speed = speedOption ? command.options?.['router-speed'] || speedOption.default : 'standard';
     const bindings = command.model_bindings?.length ? command.model_bindings : command.profile ? [{id:'default',model:command.model,profile:command.profile,visible:true}] : [];
     return <article className="command-card" key={name}>
       <header><div><button className="command-name" onClick={() => edit(name, command)}><span>›</span>{name}</button><p className="cell-note">{command.label || template?.label}</p></div><button className={`toggle-label ${command.enabled !== false ? 'on' : ''}`} onClick={() => toggle(name, command)}><i/>{command.enabled !== false ? '可启动' : '已停用'}</button></header>
-      <div className="command-card-meta"><span>{template?.label}</span><span>{bindings.filter(item => item.visible).length || '原生'}{bindings.length ? ' 个可选模型' : '模型'}</span></div>
+      <div className="command-card-meta"><span>{template?.label}</span><span>{bindings.filter(item => item.visible).length || '原生'}{bindings.length ? ' 个可选模型' : '模型'}</span>{speedOption && <span>API · {speed === 'fast' ? 'Router Fast' : '标准'}</span>}</div>
       <div className="command-model-summary">{bindings.map(item => {
-        const target = config.profiles[item.profile]?.standard;
-        return <div key={item.id} className={item.visible ? '' : 'model-hidden'}><span><strong>{modelLabel(config,item)}</strong>{command.model === item.model && <em>默认</em>}{!item.visible && <em>隐藏</em>}</span><small>{config.management.labels?.[`backend:${target?.target}`] || target?.target}{target?.provider ? ` · ${target.provider}` : ''}</small></div>;
+        const profile = config.profiles[item.profile];
+        const target = speed === 'fast' ? profile?.fast || profile?.standard : profile?.standard;
+        return <div key={item.id} className={item.visible ? '' : 'model-hidden'}><span><strong>{modelLabel(config,item,config.profiles,speed)}</strong>{speed === 'fast' && profile?.fast && <em>Fast</em>}{command.model === item.model && <em>默认</em>}{!item.visible && <em>隐藏</em>}</span><small>{config.management.labels?.[`backend:${target?.target}`] || target?.target}{target?.provider ? ` · ${target.provider}` : ''}</small></div>;
       })}{!bindings.length && <p className="muted">{template?.request_path ? '沿用现有模型规则，可在编辑中添加模型列表。' : '使用客户端的账号与模型选择。'}</p>}</div>
       <footer><Button primary onClick={() => edit(name, command)}>编辑命令与模型</Button><button disabled={dirty} onClick={() => preview(name)}>启动预览</button><button className="delete-link" onClick={() => remove(name)}>删除</button></footer>
     </article>;
@@ -129,6 +134,7 @@ export function CommandEditor({ editor, config, close, save, ui, api }) {
   }
   return <Modal title={editor.fresh ? '新增启动命令' : `${name} · 命令与模型`} eyebrow="启动命令" close={close} wide footer={<><span className="footer-note">路由应用后生效；菜单在下次启动时读取</span><Button onClick={close}>取消</Button><Button primary onClick={submit}>保存草稿</Button></>}>
     <div className="form-grid"><Field label="命令名称"><input value={name} onChange={event => setName(event.target.value)}/></Field><Field label="显示说明"><input value={value.label || ''} onChange={event => set('label',event.target.value)}/></Field><Field label="启动方式"><select value={value.template} onChange={event => setValue(old => ({...old,template:event.target.value,options:{},mod_profile:config.management.templates[event.target.value]?.supports_mods ? old.mod_profile : undefined}))}>{Object.entries(config.management.templates).map(([id,template]) => <option key={id} value={id}>{template.label}</option>)}</select></Field><Field label="默认启动模型" hint="跟随启动器时，保留此命令的现有默认选择。">{bindings.length ? <select value={value.model || ''} onChange={event => set('model',event.target.value || null)}><option value="">跟随客户端或启动器</option>{bindings.filter(item => item.visible).map(item => <option key={item.id} value={item.model}>{label(item)}</option>)}</select> : <input value={value.model || ''} onChange={event => set('model',event.target.value || null)} placeholder="跟随客户端或启动器"/>}</Field></div>
+    {Object.entries(template?.options || {}).map(([key,option]) => <Field key={key} label={option.label} hint={key === 'router-speed' && !bindings.length ? '在可选模型中添加模型后，可以选择 Router 服务等级。' : undefined}><select disabled={key === 'router-speed' && !bindings.length} value={value.options?.[key] || option.default} onChange={event => setValue(old => ({...old,options:{...old.options,[key]:event.target.value}}))}>{Object.entries(option.choices).map(([id,choice]) => <option key={id} value={id}>{choice.label}</option>)}</select></Field>)}
     {template?.request_path && <section className="command-model-editor"><header><div><h3>可选模型 <span>{bindings.length}</span></h3><p>显示名称留空时跟随后端模型。菜单、切换提示与状态名称使用同一份配置。</p></div><div>{discoveryEnabled && <Button disabled={loadingLimits} onClick={() => loadContextLimits(true)}>刷新模型上限</Button>}<Button onClick={add}>＋ 添加模型</Button></div></header>
       {!bindings.length && <div className="callout">{value.profile ? `当前绑定：${config.management.labels?.[`profile:${value.profile}`] || value.profile}。` : '当前沿用现有路由规则。'}<Button onClick={() => { if (value.profile) setValue(old => ({...old,profile:null,match_all_models:false,model_bindings:[{id:'primary',profile:old.profile,model:old.model || config.management.profile_models?.[old.profile]?.[protocol] || allProfiles[old.profile].standard.model,label:'',description:'',visible:true,aliases:[],route_ids:[]}]})); else add(); }}>管理模型列表</Button></div>}
       {bindings.map((item,index) => { const profile = allProfiles[item.profile]; const target = profile?.standard; return <article className="command-model-item" key={item.id}>
@@ -140,7 +146,6 @@ export function CommandEditor({ editor, config, close, save, ui, api }) {
         <details className="advanced"><summary>客户端标识与兼容路由</summary><Field label={`模型 ${index+1} 的客户端标识`}><input value={item.model} onChange={event => update(index,{model:event.target.value})}/></Field><Field label={`模型 ${index+1} 的兼容名称`} hint="每行一个，保留已有会话所用的名称。"><textarea rows={2} value={(item.aliases || []).join('\n')} onChange={event => update(index,{aliases:event.target.value.split('\n').filter(Boolean)})}/></Field>{item.route_ids?.length > 0 && <p className="muted">同时更新 {item.route_ids.length} 条已关联的兼容路由。</p>}</details>
       </article>; })}
     </section>}
-    {Object.entries(template?.options || {}).map(([key,option]) => <Field key={key} label={option.label}><select value={value.options?.[key] || option.default} onChange={event => setValue(old => ({...old,options:{...old.options,[key]:event.target.value}}))}>{Object.entries(option.choices).map(([id,choice]) => <option key={id} value={id}>{choice.label}</option>)}</select></Field>)}
     {template?.supports_mods && config.management.mods && <Field label="Mod 组合"><select value={value.mod_profile || ''} onChange={event => set('mod_profile',event.target.value || undefined)}><option value="">继承客户端设置</option>{Object.entries(config.management.mods.profiles).map(([id,item]) => <option key={id} value={id}>{item.label}</option>)}</select></Field>}
     <details className="advanced"><summary>启动参数与环境变量</summary>
       <Field label="程序覆盖"><input value={value.program || ''} onChange={event => set('program',event.target.value || null)}/></Field>

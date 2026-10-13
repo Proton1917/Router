@@ -157,6 +157,14 @@ router config check
 
 Fast 是选择快速目标的客户端开关。快速目标可以指定独立 API 模型、后端、供应商和上游服务等级；命令编辑器的摘要显示其实际供应商。`validation_cases[].request_fields` 可按 JSON Pointer 设置额外请求字段，用于校验这些速度来源及其优先顺序。
 
+Claude Code API 启动方式通过 `options.router-speed` 提供独立的“Router 服务等级”。在命令编辑器的可选模型列表中绑定模型后，选择标准或 Fast，应用配置后重新启动该命令；恢复已有会话可使用 `<命令> --continue`。每个模型分别使用自身配置的标准或 Fast 目标，未配置 Fast 的模型继续使用标准目标。命令卡片显示所选等级对应的模型与供应商，客户端菜单和状态名称会为配置了快速目标的条目显示 `Router Fast`。
+
+`claude-model-catalog.py` 将所选等级合并到 `CLAUDE_CODE_EXTRA_BODY.speed`，保留其他附加请求字段，并为该 API 进程关闭原生 Fast 模式。第三方后端的 429 按客户端的普通错误及重试流程处理，Router 保留上游状态码、错误正文和重试响应头。Claude Code 原生 `/fast` 的价格和冷却提示属于其官方服务界面；Router 服务等级由管理界面选择。自动登录启动方式通过 `api_gate` 将此适配限制在 API 模式。
+
+已有 Claude Code Fast 别名恢复规则的部署，可在此启动方式的 `request_headers` 添加独立标记，并用恢复规则的 `match.absent_headers` 区分请求。独立模式按实际模型标识路由，状态栏读取 `ROUTER_MODEL_LABELS`，无需通过共享设置恢复选中模型；该内部标记应加入 `runtime.strip_request_headers`。
+
+运行 `python3 scripts/check-claude-speed.py /absolute/path/to/router.json <command>` 可使用实际配置检查全部绑定模型在标准和 Fast 下的路由。额外传入 `--live-model <客户端模型 ID>` 会通过同目录 `bin/router` 的启动预览调用官方客户端，分别发送两次真实请求，将验证记录保存在配置目录的 `.work/independent-speed/`。
+
 启动命令卡片列出全部已绑定的模型及服务来源。在“编辑命令与模型”中可以添加、删除、排序或隐藏条目，为每项选择 API 后端、模型配置和显示名称，并从可见列表中选择默认启动模型。“自定义标准与 Fast 目标”直接更新此条目独享的模型配置；配置被其他条目、客户端或手工路由使用时，为当前条目创建独立副本。更换或删除绑定后，页面清理该命令已脱离全部引用的模型配置。“模型配置”列表按应用后的命令、客户端和手工路由显示关联数量。显示名称留空时，按目标 API 模型读取 `management.labels["model:<模型 ID>"]`，未设置名称时显示 API 模型 ID。
 
 多模型列表保存在命令的 `model_bindings` 数组，每项包含 `id`、`model`、`profile`、可选的 `label`、`description`、`visible`、`aliases`、`route_ids` 和 `context_window`。`aliases` 用于启动器将已有名称规范化为当前客户端模型标识；`route_ids` 将指定的现有兼容路由关联到该模型配置，要求这些路由仅属于同一客户端上下文。Router 为各条目生成同时匹配客户端、命令请求头和模型标识的独立路由。压缩和子任务等特殊规则应位于启动方式的 `route_before` 之前。单模型 `profile` 与 `model_bindings` 不能同时设置。

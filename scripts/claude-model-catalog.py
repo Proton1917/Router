@@ -40,6 +40,22 @@ def prepare(request):
             args.append(arg)
     options = []
     environment = dict(settings.get("env", {}))
+    template = config["management"]["templates"][entry["template"]]
+    speed_option = template.get("options", {}).get("router-speed")
+    router_speed = None
+    if speed_option:
+        router_speed = entry.get("options", {}).get("router-speed", speed_option["default"])
+        if router_speed not in ("standard", "fast"):
+            raise ValueError("Router 服务等级必须为 standard 或 fast")
+        extra_body = json.loads(environment.get("CLAUDE_CODE_EXTRA_BODY", os.environ.get("CLAUDE_CODE_EXTRA_BODY", "")) or "{}")
+        if not isinstance(extra_body, dict):
+            raise ValueError("CLAUDE_CODE_EXTRA_BODY 必须是 JSON 对象")
+        extra_body["speed"] = router_speed
+        environment["CLAUDE_CODE_EXTRA_BODY"] = json.dumps(extra_body, ensure_ascii=False, separators=(",", ":"))
+        environment["CLAUDE_CODE_DISABLE_FAST_MODE"] = "1"
+        environment["ROUTER_CLAUDE_SPEED"] = router_speed
+        settings["fastMode"] = False
+        settings["fastModePerSessionOptIn"] = True
     context_bindings = [item for item in bindings if item.get("context_window") is not None]
     discovered = {}
     limits = config['management']['templates'][entry['template']].get('context_window_range')
@@ -81,14 +97,17 @@ def prepare(request):
     model_labels = {}
     capabilities = [environment.get("CLAUDE_CODE_MODEL_CAPABILITIES", os.environ.get("CLAUDE_CODE_MODEL_CAPABILITIES", ""))]
     for item in bindings:
-        destination = config["profiles"][item["profile"]]["standard"]
+        profile = config["profiles"][item["profile"]]
+        destination = profile.get("fast", profile["standard"]) if router_speed == "fast" else profile["standard"]
         model = destination.get("model") or item["model"]
         backend = destination["target"]
         label = item.get("label") or labels.get("model:" + model) or model
+        if router_speed == "fast" and profile.get("fast"):
+            label += " · Router Fast"
         description = item.get("description") or label + " · " + labels.get("backend:" + backend, backend)
         for spelling in [item["model"], *item.get("aliases", [])]:
             model_labels[spelling] = label
-        if config["profiles"][item["profile"]].get("fast"):
+        if not speed_option and profile.get("fast"):
             capabilities.append(item["model"] + "=fast_mode")
         if item.get("visible", True):
             options.append({"model": item["model"], "label": label, "description": description})
