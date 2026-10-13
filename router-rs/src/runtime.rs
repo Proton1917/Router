@@ -130,8 +130,67 @@ pub struct ClientConfig {
     pub absent_headers: Vec<String>,
     #[serde(default)]
     pub settings: Option<SettingsSource>,
+    #[serde(default)]
+    pub response_errors: Option<ResponseErrorPolicy>,
     #[serde(default, rename = "message_compatibility", alias = "word_gateway")]
     pub word_gateway: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResponseErrorPolicy {
+    pub request_headers: Vec<HeaderPredicate>,
+    pub status_map: HashMap<u16, u16>,
+    pub original_status_header: String,
+}
+
+impl ResponseErrorPolicy {
+    pub fn validate(&self) -> Result<()> {
+        if self.request_headers.is_empty() || self.status_map.is_empty() {
+            bail!("response error policy requires request predicates and status mappings");
+        }
+        for predicate in &self.request_headers {
+            predicate.validate()?;
+        }
+        validate_header(&self.original_status_header)?;
+        if !self
+            .original_status_header
+            .to_ascii_lowercase()
+            .starts_with("x-")
+        {
+            bail!("original status must use a custom x- response header");
+        }
+        for (&source, &target) in &self.status_map {
+            if !(400..=599).contains(&source) || !(400..=599).contains(&target) || source == target
+            {
+                bail!("response status mappings must preserve errors and change the status");
+            }
+        }
+        Ok(())
+    }
+
+    pub fn apply(
+        &self,
+        status: http::StatusCode,
+        request_headers: &HeaderMap,
+        response_headers: &mut HeaderMap,
+    ) -> Result<http::StatusCode> {
+        if !self
+            .request_headers
+            .iter()
+            .all(|predicate| predicate.matches(request_headers))
+        {
+            return Ok(status);
+        }
+        let Some(&mapped) = self.status_map.get(&status.as_u16()) else {
+            return Ok(status);
+        };
+        response_headers.insert(
+            self.original_status_header.parse::<http::HeaderName>()?,
+            http::HeaderValue::from_str(status.as_str())?,
+        );
+        Ok(http::StatusCode::from_u16(mapped)?)
+    }
 }
 
 impl ClientConfig {
@@ -443,6 +502,9 @@ impl RuntimeConfig {
             }
             for name in &client.absent_headers {
                 validate_header(name)?;
+            }
+            if let Some(policy) = &client.response_errors {
+                policy.validate()?;
             }
             if let Some(settings) = &client.settings {
                 if settings.path.trim().is_empty() {

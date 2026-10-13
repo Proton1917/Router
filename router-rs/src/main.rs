@@ -345,7 +345,7 @@ async fn proxy_inner(
         .context("failed to send upstream request")?;
 
     let status = upstream.status();
-    let upstream_headers = upstream.headers().clone();
+    let mut upstream_headers = upstream.headers().clone();
     // A streaming request can receive a JSON error. Only successful SSE
     // responses may enter the event filter; otherwise it buffers away the body.
     let filter_openrouter_done =
@@ -359,6 +359,20 @@ async fn proxy_inner(
         status,
         &upstream_headers,
     );
+    let status = if let Some(policy) = &client.response_errors {
+        let mapped = policy.apply(status, &headers, &mut upstream_headers)?;
+        if mapped != status {
+            eprintln!(
+                "response error compatibility: client={} upstream_status={} downstream_status={}",
+                client.id,
+                status.as_u16(),
+                mapped.as_u16()
+            );
+        }
+        mapped
+    } else {
+        status
+    };
     if backend.rewrite_model_catalog && protocol == Protocol::Models {
         let body = upstream
             .bytes()
@@ -1801,6 +1815,77 @@ fn log_upstream_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn configured_error_status_policy_preserves_error_boundaries() {
+        let bytes = env::var_os("ROUTER_TEST_CONFIG")
+            .map(|path| fs::read(path).unwrap())
+            .unwrap_or_else(|| include_bytes!("../examples/router.json").to_vec());
+        let config = RouterConfig::from_json(&bytes).unwrap();
+        let mut checked = 0;
+        for client in &config.runtime.clients {
+            let Some(policy) = &client.response_errors else {
+                continue;
+            };
+            let mut request = HeaderMap::new();
+            for predicate in &policy.request_headers {
+                request.insert(
+                    predicate.name.parse::<HeaderName>().unwrap(),
+                    predicate.values[0].parse().unwrap(),
+                );
+            }
+            for (&source, &target) in &policy.status_map {
+                let mut response = HeaderMap::new();
+                let original = response.clone();
+                assert_eq!(
+                    policy
+                        .apply(
+                            StatusCode::from_u16(source).unwrap(),
+                            &HeaderMap::new(),
+                            &mut response
+                        )
+                        .unwrap()
+                        .as_u16(),
+                    source
+                );
+                assert_eq!(response, original);
+                assert_eq!(
+                    policy
+                        .apply(
+                            StatusCode::from_u16(source).unwrap(),
+                            &request,
+                            &mut response
+                        )
+                        .unwrap()
+                        .as_u16(),
+                    target
+                );
+                assert_eq!(response[&policy.original_status_header], source.to_string());
+                response.remove(&policy.original_status_header);
+                assert_eq!(response, original);
+                let mut invalid = policy.clone();
+                invalid.status_map.insert(source, 200);
+                assert!(invalid.validate().is_err());
+                checked += 1;
+            }
+            for status in [
+                StatusCode::OK,
+                StatusCode::BAD_REQUEST,
+                StatusCode::UNAUTHORIZED,
+            ] {
+                if policy.status_map.contains_key(&status.as_u16()) {
+                    continue;
+                }
+                assert_eq!(
+                    policy
+                        .apply(status, &request, &mut HeaderMap::new())
+                        .unwrap(),
+                    status
+                );
+            }
+        }
+        assert!(checked > 0);
+    }
 
     #[tokio::test]
     async fn verifies_file_backed_processing_against_request_fixture() {

@@ -42,7 +42,11 @@
     },
     "clients": [
       {"id": "responses-client", "paths": ["/v1/responses", "/v1/responses/*"]},
-      {"id": "messages-client"}
+      {"id": "messages-client", "response_errors": {
+        "request_headers": [{"name":"x-router-fast-control", "values":["client"]}],
+        "status_map": {"429":503},
+        "original_status_header": "x-router-upstream-status"
+      }}
     ],
     "selection": {
       "model_pointer": "/model",
@@ -52,7 +56,7 @@
       "ignored_model_suffixes": []
     },
     "reasoning_policies": {},
-    "strip_request_headers": ["x-router-dry-run", "authorization", "x-api-key"],
+    "strip_request_headers": ["x-router-dry-run", "authorization", "x-api-key", "x-router-fast-control", "x-router-speed-control"],
     "cors": {
       "allow_origin": "http://localhost",
       "reflect_request_origin": false,

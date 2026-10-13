@@ -24,9 +24,10 @@
       "context_window_range": {"min":100000,"max":1000000},
       "options": {
         "router-speed": {
-          "label": "Router 服务等级（重新启动命令后生效）",
-          "default": "standard",
+          "label": "Fast 控制方式（重新启动命令后生效）",
+          "default": "client",
           "choices": {
+            "client": {"label": "客户端 /fast · 会话内切换", "args": []},
             "standard": {"label": "标准 · 使用各模型的标准目标", "args": []},
             "fast": {"label": "Fast · 使用各模型的快速目标", "args": []}
           }

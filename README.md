@@ -157,9 +157,11 @@ router config check
 
 Fast 是选择快速目标的客户端开关。快速目标可以指定独立 API 模型、后端、供应商和上游服务等级；命令编辑器的摘要显示其实际供应商。`validation_cases[].request_fields` 可按 JSON Pointer 设置额外请求字段，用于校验这些速度来源及其优先顺序。
 
-Claude Code API 启动方式通过 `options.router-speed` 提供独立的“Router 服务等级”。在命令编辑器的可选模型列表中绑定模型后，选择标准或 Fast，应用配置后重新启动该命令；恢复已有会话可使用 `<命令> --continue`。每个模型分别使用自身配置的标准或 Fast 目标，未配置 Fast 的模型继续使用标准目标。命令卡片显示所选等级对应的模型与供应商，客户端菜单和状态名称会为配置了快速目标的条目显示 `Router Fast`。
+Claude Code API 启动方式通过 `options.router-speed` 提供“Fast 控制方式”。默认选择“客户端 /fast”，在会话内使用原生 `/fast` 开关；每个模型使用自身配置的标准或快速目标。也可选择固定标准或固定 Fast，固定 Fast 的客户端模型名称带有 `Router Fast`。应用启动配置后重新启动命令；恢复已有会话可使用 `<命令> --continue`。
 
-`claude-model-catalog.py` 将所选等级合并到 `CLAUDE_CODE_EXTRA_BODY.speed`，保留其他附加请求字段，并为该 API 进程关闭原生 Fast 模式。第三方后端的 429 按客户端的普通错误及重试流程处理，Router 保留上游状态码、错误正文和重试响应头。Claude Code 原生 `/fast` 的价格和冷却提示属于其官方服务界面；Router 服务等级由管理界面选择。自动登录启动方式通过 `api_gate` 将此适配限制在 API 模式。
+`claude-model-catalog.py` 在客户端控制模式下启用原生 Fast 能力，由客户端发送 `speed`；固定模式将所选等级合并到 `CLAUDE_CODE_EXTRA_BODY.speed` 并关闭原生开关。两种模式均保留其他附加请求字段。自动登录启动方式通过 `api_gate` 将此适配限制在 API 模式。
+
+`runtime.clients[].response_errors` 提供按请求头限定的错误状态转换。示例仅对携带 `x-router-fast-control: client` 的客户端将上游 429 返回为 503，并通过 `x-router-upstream-status: 429` 保留原始状态；错误正文和 `Retry-After` 等响应头原样传递，日志同时记录上下游状态。Claude Code 因此执行普通错误重试，保留当前 Fast 线路。真实上游限额仍然生效，重试达到客户端上限后报错。原生 `/fast` 中的 Opus 价格文案仍由客户端提供，实际模型和计费以所选后端为准。错误映射只能将 400～599 转为另一个错误状态，不能转换为成功。
 
 已有 Claude Code Fast 别名恢复规则的部署，可在此启动方式的 `request_headers` 添加独立标记，并用恢复规则的 `match.absent_headers` 区分请求。独立模式按实际模型标识路由，状态栏读取 `ROUTER_MODEL_LABELS`，无需通过共享设置恢复选中模型；该内部标记应加入 `runtime.strip_request_headers`。
 

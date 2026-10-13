@@ -18,7 +18,7 @@ export function CommandList({ config, rows, edit, preview, remove, toggle, dirty
     const bindings = command.model_bindings?.length ? command.model_bindings : command.profile ? [{id:'default',model:command.model,profile:command.profile,visible:true}] : [];
     return <article className="command-card" key={name}>
       <header><div><button className="command-name" onClick={() => edit(name, command)}><span>›</span>{name}</button><p className="cell-note">{command.label || template?.label}</p></div><button className={`toggle-label ${command.enabled !== false ? 'on' : ''}`} onClick={() => toggle(name, command)}><i/>{command.enabled !== false ? '可启动' : '已停用'}</button></header>
-      <div className="command-card-meta"><span>{template?.label}</span><span>{bindings.filter(item => item.visible).length || '原生'}{bindings.length ? ' 个可选模型' : '模型'}</span>{speedOption && <span>API · {speed === 'fast' ? 'Router Fast' : '标准'}</span>}</div>
+      <div className="command-card-meta"><span>{template?.label}</span><span>{bindings.filter(item => item.visible).length || '原生'}{bindings.length ? ' 个可选模型' : '模型'}</span>{speedOption && <span>API · {speed === 'client' ? '客户端 /fast' : speed === 'fast' ? 'Router Fast' : '标准'}</span>}</div>
       <div className="command-model-summary">{bindings.map(item => {
         const profile = config.profiles[item.profile];
         const target = speed === 'fast' ? profile?.fast || profile?.standard : profile?.standard;

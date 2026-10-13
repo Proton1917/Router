@@ -45,16 +45,29 @@ def prepare(request):
     router_speed = None
     if speed_option:
         router_speed = entry.get("options", {}).get("router-speed", speed_option["default"])
-        if router_speed not in ("standard", "fast"):
-            raise ValueError("Router 服务等级必须为 standard 或 fast")
+        if router_speed not in ("client", "standard", "fast"):
+            raise ValueError("Router 服务等级必须为 client、standard 或 fast")
         extra_body = json.loads(environment.get("CLAUDE_CODE_EXTRA_BODY", os.environ.get("CLAUDE_CODE_EXTRA_BODY", "")) or "{}")
         if not isinstance(extra_body, dict):
             raise ValueError("CLAUDE_CODE_EXTRA_BODY 必须是 JSON 对象")
-        extra_body["speed"] = router_speed
+        native_fast = router_speed == "client"
+        if native_fast:
+            extra_body.pop("speed", None)
+        else:
+            extra_body["speed"] = router_speed
         environment["CLAUDE_CODE_EXTRA_BODY"] = json.dumps(extra_body, ensure_ascii=False, separators=(",", ":"))
-        environment["CLAUDE_CODE_DISABLE_FAST_MODE"] = "1"
-        environment["ROUTER_CLAUDE_SPEED"] = router_speed
-        settings["fastMode"] = False
+        environment["CLAUDE_CODE_DISABLE_FAST_MODE"] = "0" if native_fast else "1"
+        environment["ROUTER_CLAUDE_SPEED"] = "" if native_fast else router_speed
+        header_env = template.get("header_env")
+        if not header_env:
+            raise ValueError("Router 服务等级需要启动方式声明 header_env")
+        headers = Parser().parsestr(environment.get(header_env, os.environ.get(header_env, "")))
+        for key in ("x-router-speed-control", "x-router-fast-control"):
+            del headers[key]
+        headers["x-router-fast-control" if native_fast else "x-router-speed-control"] = "client" if native_fast else "independent"
+        environment[header_env] = str(headers).rstrip()
+        if not native_fast:
+            settings["fastMode"] = False
         settings["fastModePerSessionOptIn"] = True
     context_bindings = [item for item in bindings if item.get("context_window") is not None]
     discovered = {}
@@ -107,7 +120,7 @@ def prepare(request):
         description = item.get("description") or label + " · " + labels.get("backend:" + backend, backend)
         for spelling in [item["model"], *item.get("aliases", [])]:
             model_labels[spelling] = label
-        if not speed_option and profile.get("fast"):
+        if (not speed_option or router_speed == "client") and profile.get("fast"):
             capabilities.append(item["model"] + "=fast_mode")
         if item.get("visible", True):
             options.append({"model": item["model"], "label": label, "description": description})
