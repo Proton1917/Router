@@ -902,9 +902,9 @@ fn validate_identifier(value: &str, field: &str) -> Result<()> {
     if value.is_empty()
         || !value
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
     {
-        bail!("{field} is not a valid identifier");
+        bail!("{field} 标识只能包含字母、数字、下划线、连字符和句点");
     }
     Ok(())
 }
