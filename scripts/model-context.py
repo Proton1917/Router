@@ -45,24 +45,30 @@ class Discovery:
         if not positive(self.settings['ttl_seconds']) or not positive(self.settings['timeout_seconds']):
             raise ValueError('上下文目录缓存时间和超时必须为正整数')
 
+    def catalog_url(self, target, path):
+        source = self.settings.get('sources', {}).get(target, {})
+        backend = self.config['runtime']['backends'][target]
+        return source.get('base_url', backend['base_url']).rstrip('/') + path
+
     def get(self, target, path):
         backend = self.config['runtime']['backends'][target]
-        url = backend['base_url'].rstrip('/') + path
+        source = self.settings.get('sources', {}).get(target, {})
+        url = self.catalog_url(target, path)
         if url in self.responses:
             return self.responses[url]
         if target not in self.headers:
             auth = backend.get('auth', {})
             token = ''
             if auth.get('token_file'):
-                source = Path(auth['token_file'])
-                token = (source if source.is_absolute() else self.directory / source).read_text().strip()
+                token_source = Path(auth['token_file'])
+                token = (token_source if token_source.is_absolute() else self.directory / token_source).read_text().strip()
             elif auth.get('token_env'):
                 token = os.environ[auth['token_env']]
             elif auth.get('token_command'):
                 token = subprocess.run(auth['token_command'], check=True, capture_output=True, text=True, timeout=self.settings['timeout_seconds']).stdout.strip()
             if auth and not token:
                 raise ValueError('目录凭据不可用：' + target)
-            self.headers[target] = {name: text.format(token=token) for name, text in auth.get('headers', {}).items()}
+            self.headers[target] = {name: text.format(token=token) for name, text in source.get('auth_headers', auth.get('headers', {})).items()}
         request = urllib.request.Request(url, headers=self.headers[target])
         with self.opener.open(request, timeout=self.settings['timeout_seconds']) as response:
             self.responses[url] = json.load(response)
@@ -78,7 +84,7 @@ class Discovery:
             return {**base, 'message': '此后端尚未提供上下文目录配置'}
         if any(model.startswith(prefix) for prefix in source.get('unsupported_prefixes', [])):
             return {**base, 'message': '此入口的目录没有公布预设的上下文上限'}
-        identity = {'base_url': self.config['runtime']['backends'][target]['base_url'], 'target': target, 'model': model, 'provider': provider, 'source': source}
+        identity = {'base_url': self.catalog_url(target, ''), 'target': target, 'model': model, 'provider': provider, 'source': source}
         key = hashlib.blake2b(json.dumps(identity, sort_keys=True).encode(), digest_size=16).hexdigest()
         cache = self.cache / (key + '.json')
         if cache.exists() and not self.refresh:
@@ -101,7 +107,7 @@ class Discovery:
                 raise ValueError('预设目录的供应商配置无效：' + model)
             resolved = [self.destination({'target':target, 'model':item, 'provider':provider}) for item in models for provider in providers]
             limits = [row['max_tokens'] for row in resolved if row['max_tokens'] is not None]
-            result = {**base, 'max_tokens': min(limits) if len(limits) == len(resolved) else None, 'resolved_models': models, 'source': self.config['runtime']['backends'][target]['base_url'].rstrip('/') + path, 'checked_at': int(time.time())}
+            result = {**base, 'max_tokens': min(limits) if len(limits) == len(resolved) else None, 'resolved_models': models, 'source': self.catalog_url(target, path), 'checked_at': int(time.time())}
             if result['max_tokens'] is None:
                 result['message'] = '预设中的模型目录没有公布完整上下文上限'
             self.save(cache, result)
@@ -112,7 +118,7 @@ class Discovery:
             raise ValueError('模型目录没有返回配置的模型数组：' + target)
         matches = [row for row in rows if row.get(source['id']) == model]
         if not matches:
-            result = {**base, 'message': '后端模型目录未收录此 API 标识', 'checked_at':int(time.time()), 'source':self.config['runtime']['backends'][target]['base_url'].rstrip('/') + source['path']}
+            result = {**base, 'message': '后端模型目录未收录此 API 标识', 'checked_at':int(time.time()), 'source':self.catalog_url(target, source['path'])}
             self.save(cache, result)
             return result
         if len(matches) > 1:
@@ -121,7 +127,7 @@ class Discovery:
         if window is not None and not positive(window):
             raise ValueError('模型目录的上下文上限必须为正整数：' + model)
         limits = [window] if positive(window) else []
-        result = {**base, 'source': self.config['runtime']['backends'][target]['base_url'].rstrip('/') + source['path']}
+        result = {**base, 'source': self.catalog_url(target, source['path'])}
         endpoints = source.get('endpoints')
         if endpoints and limits:
             path = endpoints['path'].format(model=urllib.parse.quote(model, safe='/'))
@@ -143,7 +149,7 @@ class Discovery:
                         raise ValueError('供应商端点的输入上限必须为正整数：' + model)
                     if positive(value):
                         limits.append(value)
-            result['source'] = self.config['runtime']['backends'][target]['base_url'].rstrip('/') + path
+            result['source'] = self.catalog_url(target, path)
         result['max_tokens'] = min(limits) if limits else None
         if not limits:
             result['message'] = '后端模型目录没有公布上下文上限'
