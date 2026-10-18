@@ -18,3 +18,4 @@ if /bin/launchctl print "$domain/$label" >/dev/null 2>&1; then
 else
   /bin/launchctl bootstrap "$domain" "$plist"
 fi
+/usr/bin/env python3 "${0:A:h}/log-maintenance.py" install --service-plist "$plist"

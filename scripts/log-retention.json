@@ -1,0 +1,6 @@
+{
+  "check_interval_seconds": 300,
+  "max_file_bytes": 4194304,
+  "retain_tail_bytes": 1048576,
+  "max_total_bytes": 16777216
+}

@@ -14,5 +14,7 @@
   "scripts/codex-launch.py": "scripts/codex-launch.py",
   "scripts/codex-catalog.jq": "scripts/codex-catalog.jq",
   "scripts/codex-model-source.py": "scripts/codex-model-source.py",
-  "scripts/macos-service.zsh": "scripts/macos-service.zsh"
+  "scripts/macos-service.zsh": "scripts/macos-service.zsh",
+  "scripts/log-maintenance.py": "scripts/log-maintenance.py",
+  "scripts/log-retention.json": "scripts/log-retention.json"
 }

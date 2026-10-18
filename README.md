@@ -340,6 +340,23 @@ claude --model '<model-id>'
 
 示例配置会移除客户端传入的认证请求头，随后注入 router 自己读取的上游凭据。
 
+## 日志保留
+
+macOS 后台服务启动时会配置独立的日志维护任务。默认每 5 分钟检查一次 `management.log_directory` 下的 `.log` 文件：单文件超过 4 MiB 时保留末尾约 1 MiB，总量超过 16 MiB 时优先缩减较大的文件，直至总量回到限制内。检查之间仍可继续写入，下一次检查会重新限制大小。
+
+维护任务直接缩减已有文件，保留文件身份和最新完整日志行，后台 Router 继续运行，不生成额外归档。读取与写入量受保留尾部大小限制；未达到清理条件时只检查文件信息。
+
+策略保存在配置目录的 `log-retention.json`。`check_interval_seconds` 设置检查间隔，`max_file_bytes`、`retain_tail_bytes`、`max_total_bytes` 分别设置单文件阈值、保留尾部和总量阈值，单位为字节。调整检查间隔后重新执行服务启动操作，使维护任务读取新的时间间隔；大小设置在下一次检查时生效。
+
+已有安装可执行以下命令启用维护任务，`--service-plist` 指向当前 Router 的 launchd 服务文件：
+
+```sh
+python3 scripts/log-maintenance.py install --service-plist /path/to/service.plist
+python3 scripts/log-maintenance.py run --config /path/to/router.json --report
+```
+
+维护任务名称为原服务名称加 `.logs`，使用当前用户的 launchd 会话调度。维护错误写入同一目录的 `log-maintenance.log`，该文件也受同一策略限制。
+
 ## Codex
 
 控制台的“启动命令 → 编辑命令与模型”中，支持切换登录方式的 Codex 模板提供“默认启动模式”和“账号配置与凭据目录”。默认使用 API；账号模式使用该目录下独立的配置、凭据和会话，模型及 Fast 由 Codex 原生菜单选择。切换模式会保留 API 模型列表。
