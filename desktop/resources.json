@@ -11,6 +11,7 @@
   "scripts/claude-context-status.py": "scripts/claude-context-status.py",
   "scripts/model-context.py": "scripts/model-context.py",
   "scripts/codex-api.zsh": "scripts/codex-api.zsh",
+  "scripts/codex-launch.py": "scripts/codex-launch.py",
   "scripts/codex-catalog.jq": "scripts/codex-catalog.jq",
   "scripts/codex-model-source.py": "scripts/codex-model-source.py",
   "scripts/macos-service.zsh": "scripts/macos-service.zsh"

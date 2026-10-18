@@ -41,21 +41,36 @@
       "env": {"ANTHROPIC_BASE_URL": "{{ gateway_url }}", "ANTHROPIC_AUTH_TOKEN": "local-router", "ANTHROPIC_API_KEY": "", "CLAUDE_CODE_MAX_CONTEXT_TOKENS":"200000"}
     },
     "responses-client": {
-      "label": "Codex API",
+      "label": "Codex · API／独立账号",
+      "deferred": true,
+      "env": {
+        "ROUTER_CODEX_USE_CATALOG": "0",
+        "ROUTER_CODEX_SERVICE_TIERS": "{\"standard\":\"default\",\"fast\":\"fast\"}",
+        "ROUTER_CODEX_ACCOUNT_HOME": "{{ config.management.credential_directory }}/codex/{{ command_name }}",
+        "ROUTER_CODEX_ACCOUNT_ARGS": "[\"--no-daemon\",\"-c\",\"model_provider=\\\"openai\\\"\",\"-c\",\"forced_login_method=\\\"chatgpt\\\"\",\"-c\",\"cli_auth_credentials_store=\\\"file\\\"\"]"
+      },
       "options": {
+        "auth-mode": {
+          "label": "默认启动模式",
+          "default": "api",
+          "choices": {
+            "api": {"label": "API · Router 模型与后端", "args": []},
+            "account": {"label": "账号登录 · 独立 ChatGPT 账号", "args": []}
+          }
+        },
         "service-tier": {
           "label": "启动服务等级",
           "default": "standard",
           "choices": {
-            "standard": {"label": "标准", "args": ["-c", "service_tier=\"default\""]},
-            "fast": {"label": "Fast · 快速", "args": ["-c", "service_tier=\"fast\""]}
+            "standard": {"label": "标准", "args": ["--router-service-tier", "standard"]},
+            "fast": {"label": "Fast · 快速", "args": ["--router-service-tier", "fast"]}
           }
         }
       },
-      "description": "通过网关调用原生 Responses 后端。",
-      "program": "codex",
-      "args": ["-c", "model_provider=\"router\"", "-c", "model_providers.router.name=\"router\"", "-c", "model_providers.router.base_url=\"{{ gateway_url }}/v1\"", "-c", "model_providers.router.wire_api=\"responses\"", "-c", "model_providers.router.requires_openai_auth=false", "-c", "model_providers.router.supports_websockets=false", "-c", "model_providers.router.http_headers={\"{{ command_header }}\"=\"{{ command_name }}\"}"],
-      "model_flags": ["--model", "-m"],
+      "description": "选择 Router API 或独立 ChatGPT 账号登录，分别保留模型列表与登录凭据。",
+      "program": "python3",
+      "args": ["{{ config.management.assets_directory }}/../scripts/codex-launch.py", "-", "client-state/codex-catalogs", "codex", "-c", "model_provider=\"router\"", "-c", "model_providers.router.name=\"router\"", "-c", "model_providers.router.base_url=\"{{ gateway_url }}/v1\"", "-c", "model_providers.router.wire_api=\"responses\"", "-c", "model_providers.router.requires_openai_auth=false", "-c", "model_providers.router.supports_websockets=false", "-c", "model_providers.router.http_headers={\"{{ command_header }}\"=\"{{ command_name }}\"}", "--"],
+      "model_flags": [],
       "request_path": "/v1/responses",
       "route_before": "responses",
       "unset_env": ["OPENAI_API_KEY", "OPENAI_BASE_URL"]

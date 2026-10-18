@@ -40,7 +40,7 @@ Homebrew 会自动添加项目的 Tap。升级桌面应用使用 `brew upgrade -
 
 1. **API 后端**：编辑示例 `messages` 或 `responses`，填写服务商的 API 基础地址。选择“独立凭据文件”，粘贴 API Key，点击“保存密钥文件”。按服务商要求设置认证请求头模板，保存编辑并应用修改。示例分别使用 `x-api-key: {token}` 和 `Authorization: Bearer {token}`。
 2. **模型配置**：选择后端并填写其支持的模型 ID。需要固定模型时填写标准目标的模型字段；需要 Fast 时配置该模型自己的 Fast 目标或服务等级。未设置固定模型的示例 profile 会保留客户端请求的模型 ID。
-3. **启动命令**：新增名称，选择启动方式、模型和模型配置，保存并应用。Claude Code API 使用 `messages-client`，Codex API 使用 `responses-client`，Codex 登录使用 `account-client`。命令名称可以自行填写，例如 `cc`、`cdx`、`cx`。Claude Code、Codex 客户端需自行安装，其程序名或绝对路径可在“启动方式”中调整。
+3. **启动命令**：新增名称，选择启动方式、模型和模型配置，保存并应用。Claude Code API 使用 `messages-client`；Codex 的 `responses-client` 可选择 API 或独立账号登录，`account-client` 使用客户端现有登录。命令名称可以自行填写，例如 `cc`、`cdx`、`cx`。Claude Code、Codex 客户端需自行安装，其程序名或绝对路径可在“启动方式”中调整。
 4. 在新终端输入创建的命令。之后新增、重命名或修改命令均在控制台完成，应用修改后自动同步终端入口。
 
 创建示例配置后，真实上游调用需要自己的有效 API Key 和有权限使用的模型。新增后端时，在编辑页面的“支持的接口协议”中勾选其实际支持的接口；模型配置、命令绑定与路由校验会使用该声明。
@@ -341,6 +341,21 @@ claude --model '<model-id>'
 示例配置会移除客户端传入的认证请求头，随后注入 router 自己读取的上游凭据。
 
 ## Codex
+
+控制台的“启动命令 → 编辑命令与模型”中，支持切换登录方式的 Codex 模板提供“默认启动模式”和“账号配置与凭据目录”。默认使用 API；账号模式使用该目录下独立的配置、凭据和会话，模型及 Fast 由 Codex 原生菜单选择。切换模式会保留 API 模型列表。
+
+以 `cdx` 为例，可在终端临时选择模式并完成第二个账号登录：
+
+```sh
+cdx --router-mode account login
+cdx --router-mode account login status
+cdx --router-mode account
+cdx --router-mode api
+```
+
+首次登录在浏览器选择所需的另一个 ChatGPT 账号。账号模式使用其订阅额度；API 模式使用 Router 各后端的凭据与计费。独立账号目录通过 `CODEX_HOME` 传给官方 CLI，并使用 `cli_auth_credentials_store="file"` 保存凭据，目录权限为 `0700`。凭据目录应放在 Git 工作区之外；现有默认 `~/.codex` 账号和其他入口保留原配置。模式选择与目录修改在下次启动时生效，正在运行的会话保持原模式。
+
+此入口使用 `scripts/codex-launch.py` 选择启动路径，复用 `router __exec` 启动 API 客户端。启动模板以 `options.auth-mode` 声明模式，以 `ROUTER_CODEX_ACCOUNT_HOME` 和 JSON 数组 `ROUTER_CODEX_ACCOUNT_ARGS` 配置账号目录及原生参数。服务等级映射保存在 `ROUTER_CODEX_SERVICE_TIERS`；`ROUTER_CODEX_USE_CATALOG=0` 直接启动兼容 Responses 的客户端，其他值沿用下述目录适配流程。API 模式的默认模型由脚本从当前命令配置读取，模板的 `model_flags` 留空，避免将 API 模型传入账号模式。启动脚本需要 Python 3。
 
 在 Codex 用户级配置中添加自定义 provider，并选择上游 Responses 接口支持的模型：
 
