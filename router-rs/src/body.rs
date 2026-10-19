@@ -248,11 +248,19 @@ impl JsonBody {
     pub fn visit_array(
         &self,
         path: &str,
-        mut visit: impl FnMut(usize, Span) -> Result<()>,
+        visit: impl FnMut(usize, Span) -> Result<()>,
     ) -> Result<()> {
         let Some(span) = self.at(&pointer(path))? else {
             return Ok(());
         };
+        self.visit_array_span(span, visit)
+    }
+
+    pub fn visit_array_span(
+        &self,
+        span: Span,
+        mut visit: impl FnMut(usize, Span) -> Result<()>,
+    ) -> Result<()> {
         let mut reader = self.reader(span)?;
         if reader.peek()? != ValueType::Array {
             return Ok(());

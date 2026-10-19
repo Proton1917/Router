@@ -129,7 +129,7 @@ pub fn prepare(
             if body.kind(content)? == struson::reader::ValueType::String {
                 texts.push((path, content));
             } else {
-                body.visit_array(&path, |block_index, block| {
+                body.visit_array_span(content, |block_index, block| {
                     let fields = body.fields(block)?;
                     if let Some(text) = fields.get("text") {
                         texts.push((format!("{path}/{block_index}/text"), *text));
