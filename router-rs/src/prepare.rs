@@ -99,6 +99,12 @@ pub fn prepare(
             }
         }
     }
+    let text_rules = config
+        .runtime
+        .request_text_rewrites
+        .iter()
+        .filter(|rule| rule.contexts.iter().any(|id| id == context))
+        .collect::<Vec<_>>();
     let markers = config
         .routes
         .iter()
@@ -112,6 +118,51 @@ pub fn prepare(
     } else {
         Vec::new()
     };
+    for rule in text_rules {
+        if protocol != Protocol::Messages {
+            continue;
+        }
+        let mut patch = Patch::default();
+        for &(index, content) in body.user_contents()? {
+            let path = format!("/messages/{index}/content");
+            let mut texts = Vec::new();
+            if body.kind(content)? == struson::reader::ValueType::String {
+                texts.push((path, content));
+            } else {
+                body.visit_array(&path, |block_index, block| {
+                    let fields = body.fields(block)?;
+                    if let Some(text) = fields.get("text") {
+                        texts.push((format!("{path}/{block_index}/text"), *text));
+                    }
+                    Ok(())
+                })?;
+            }
+            let mut candidates = Vec::new();
+            for (path, text) in texts {
+                if body.string_starts_with(text, &rule.prefixes)? {
+                    candidates.push((path, text));
+                }
+            }
+            if candidates.is_empty() {
+                continue;
+            }
+            let matched = body.matching_strings(content, &rule.markers)?;
+            if rule.markers.iter().all(|marker| matched.contains(marker)) {
+                for (path, text) in candidates {
+                    let value = body.value(text)?;
+                    let mut value = value
+                        .as_str()
+                        .context("request rewrite text must be a string")?
+                        .to_owned();
+                    for replacement in &rule.replacements {
+                        value = value.replace(&replacement.from, &replacement.to);
+                    }
+                    assign(&mut patch, &path, Value::String(value));
+                }
+            }
+        }
+        rewrite(&mut body, patch)?;
+    }
     let route = config.resolve_with_markers(
         context,
         headers,

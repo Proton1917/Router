@@ -48,6 +48,16 @@
         "original_status_header": "x-router-upstream-status"
       }}
     ],
+    "request_text_rewrites": [{
+      "contexts": ["messages-client"],
+      "markers": ["<command-message>init</command-message>\n<command-name>/init</command-name>"],
+      "prefixes": ["Please analyze this codebase and create a CLAUDE.md file,", "Set up a minimal CLAUDE.md (and optionally skills and hooks) for this repo."],
+      "replacements": [
+        {"from": "CLAUDE.md", "to": "AGENTS.md"},
+        {"from": "~/.claude/AGENTS.md", "to": "~/.claude/CLAUDE.md"},
+        {"from": "This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.", "to": "This file provides guidance to coding agents when working with code in this repository."}
+      ]
+    }],
     "selection": {
       "model_pointer": "/model",
       "speed_pointer": "/speed",

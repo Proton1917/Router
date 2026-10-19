@@ -33,7 +33,7 @@
           }
         }
       },
-      "args": [],
+      "args": ["--settings", "{\"enabledPlugins\":{\"cc-plugin-agents-md@builtin\":true},\"pluginConfigs\":{\"cc-plugin-agents-md@builtin\":{\"options\":{\"instructionFiles\":\"claude-md-and-agents-md\"}}}}"],
       "model_flags": ["--model"],
       "header_env": "ANTHROPIC_CUSTOM_HEADERS",
       "request_path": "/v1/messages",

@@ -12,10 +12,28 @@ pub struct RuntimeConfig {
     pub server: Option<crate::server::ServerConfig>,
     pub backends: HashMap<String, BackendConfig>,
     pub clients: Vec<ClientConfig>,
+    #[serde(default)]
+    pub request_text_rewrites: Vec<RequestTextRewrite>,
     pub selection: SelectionPolicy,
     pub reasoning_policies: HashMap<String, ReasoningPolicy>,
     pub strip_request_headers: Vec<String>,
     pub cors: CorsPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RequestTextRewrite {
+    pub contexts: Vec<String>,
+    pub markers: Vec<String>,
+    pub prefixes: Vec<String>,
+    pub replacements: Vec<TextReplacement>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TextReplacement {
+    pub from: String,
+    pub to: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -525,6 +543,26 @@ impl RuntimeConfig {
         }
         if !self.clients.last().is_some_and(ClientConfig::is_catch_all) {
             bail!("final client must be a catch-all");
+        }
+        for rule in &self.request_text_rewrites {
+            if rule.contexts.is_empty()
+                || rule.markers.is_empty()
+                || rule.prefixes.is_empty()
+                || rule.replacements.is_empty()
+                || rule
+                    .markers
+                    .iter()
+                    .chain(&rule.prefixes)
+                    .any(String::is_empty)
+                || rule.replacements.iter().any(|item| item.from.is_empty())
+            {
+                bail!("request text rewrite requires contexts, markers, prefixes and replacements");
+            }
+            for context in &rule.contexts {
+                if !self.clients.iter().any(|client| &client.id == context) {
+                    bail!("request text rewrite references unknown client context {context}");
+                }
+            }
         }
         validate_pointer(&self.selection.model_pointer)?;
         validate_pointer(&self.selection.speed_pointer)?;

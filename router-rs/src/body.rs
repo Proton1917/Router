@@ -72,6 +72,7 @@ pub struct JsonBody {
     pub len: u64,
     settings: BodyProcessing,
     root_fields: Arc<OnceLock<BTreeMap<String, Span>>>,
+    user_contents: Arc<OnceLock<Vec<(usize, Span)>>>,
 }
 
 #[derive(Clone)]
@@ -129,6 +130,7 @@ impl JsonBody {
             len: 0,
             settings: settings.clone(),
             root_fields: Arc::new(OnceLock::new()),
+            user_contents: Arc::new(OnceLock::new()),
         })
     }
 
@@ -265,21 +267,24 @@ impl JsonBody {
         Ok(())
     }
 
-    pub fn last_user_matches(&self, markers: &[String]) -> Result<Vec<String>> {
-        if markers.is_empty() {
-            return Ok(Vec::new());
+    pub fn user_contents(&self) -> Result<&[(usize, Span)]> {
+        if let Some(contents) = self.user_contents.get() {
+            return Ok(contents);
         }
         let Some(messages) = self.at(&pointer("/messages"))? else {
-            return Ok(Vec::new());
+            return Ok(&[]);
         };
         let mut reader = self.reader(messages)?;
         if reader.peek()? != ValueType::Array {
-            return Ok(Vec::new());
+            return Ok(&[]);
         }
         reader.begin_array()?;
-        let mut last = None;
+        let mut contents = Vec::new();
+        let mut index = 0;
         while reader.has_next()? {
             let message = take_span(&mut reader, messages.start)?;
+            let current = index;
+            index += 1;
             if self.kind(message)? != ValueType::Object {
                 continue;
             }
@@ -288,14 +293,42 @@ impl JsonBody {
                 && self.value(*role)?.as_str() == Some("user")
                 && let Some(content) = fields.get("content")
             {
-                last = Some(*content);
+                contents.push((current, *content));
             }
         }
-        let Some(last) = last else {
+        let _ = self.user_contents.set(contents);
+        Ok(self.user_contents.get().expect("user contents initialized"))
+    }
+
+    pub fn string_starts_with(&self, span: Span, prefixes: &[String]) -> Result<bool> {
+        let mut reader = self.reader(span)?;
+        if reader.peek()? != ValueType::String {
+            return Ok(false);
+        }
+        let length = prefixes.iter().map(String::len).max().unwrap_or(0);
+        let mut head = Vec::with_capacity(length);
+        reader
+            .next_string_reader()?
+            .take(length as u64)
+            .read_to_end(&mut head)?;
+        Ok(prefixes
+            .iter()
+            .any(|prefix| head.starts_with(prefix.as_bytes())))
+    }
+
+    pub fn last_user_matches(&self, markers: &[String]) -> Result<Vec<String>> {
+        if markers.is_empty() {
+            return Ok(Vec::new());
+        }
+        let Some(&(_, last)) = self.user_contents()?.last() else {
             return Ok(Vec::new());
         };
+        self.matching_strings(last, markers)
+    }
+
+    pub fn matching_strings(&self, content: Span, markers: &[String]) -> Result<Vec<String>> {
         let mut found = vec![false; markers.len()];
-        self.scan_strings(&mut self.reader(last)?, markers, &mut found)?;
+        self.scan_strings(&mut self.reader(content)?, markers, &mut found)?;
         Ok(markers
             .iter()
             .zip(found)

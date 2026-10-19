@@ -340,6 +340,14 @@ claude --model '<model-id>'
 
 示例配置会移除客户端传入的认证请求头，随后注入 router 自己读取的上游凭据。
 
+## 项目初始化
+
+通过 Claude Code API 命令运行 `/init` 时，Router 根据用户消息中的完整命令标记和初始化模板识别该操作，并将项目指令文件目标设置为 `AGENTS.md`。已有文件由初始化流程读取并提出完善内容；用户级个人指令路径保留客户端原有约定。普通对话、工具结果和其他客户端请求沿用原内容。
+
+规则位于 `runtime.request_text_rewrites`。每条规则声明客户端 `contexts`、必须同时命中的 `markers`、目标文本块的 `prefixes` 和有序 `replacements`。只有同一条用户消息同时包含命令标记和指定模板前缀时，才处理其中对应的文本块。客户端在后续请求中重发该初始化模板时，Router 使用相同映射，因此工具轮次和交互式回答都保持初始化目标一致。客户端保存的原始会话记录保留原样。替换按列表顺序执行，其他文本块和系统提示均保留。初始化标记、模板前缀和文件名通过 JSON 修改后生效。
+
+Claude Code 2.1.285 及以上版本可在启动设置中配置 `pluginConfigs.cc-plugin-agents-md@builtin.options.instructionFiles` 为 `claude-md-and-agents-md`，同时读取项目中的 `CLAUDE.md` 和 `AGENTS.md`。新建配置的 Claude Code API 模板携带此设置；已有安装可在客户端设置文件中配置同一字段。使用 `/memory` 检查当前项目已加载的指令文件。
+
 ## 日志保留
 
 macOS 后台服务启动时会配置独立的日志维护任务。默认每 5 分钟检查一次 `management.log_directory` 下的 `.log` 文件：单文件超过 4 MiB 时保留末尾约 1 MiB，总量超过 16 MiB 时优先缩减较大的文件，直至总量回到限制内。检查之间仍可继续写入，下一次检查会重新限制大小。
