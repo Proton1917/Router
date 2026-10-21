@@ -1,0 +1,18 @@
+# Router 在任务目录生成此配置的独立副本，并写入该任务的 [router] 设置。
+schema_version = 4
+chunk_seconds = 900
+overlap_seconds = 30
+min_chunk_seconds = 30
+max_output_tokens = 16000
+split_output_tokens = 12000
+parallel_requests = 1
+retries = 5
+max_adaptive_depth = 4
+max_http_attempts = 1000
+max_temp_bytes = 21474836480
+max_speakers = 16
+speaker_reference_seconds = 6
+speaker_reference_silence_seconds = 1
+speaker_context_chars = 4000
+max_transcript_bytes = 67108864
+max_total_turns = 100000

@@ -26,6 +26,7 @@ mod prepare;
 mod routing;
 mod runtime;
 mod server;
+mod transcription;
 
 use server::{Arguments, Protocol, ServerConfig};
 
@@ -41,6 +42,7 @@ struct AppState {
     server: Arc<ServerConfig>,
     processing: Arc<tokio::sync::Semaphore>,
     web_url: Option<String>,
+    transcription: Arc<transcription::Service>,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -88,9 +90,10 @@ async fn main() -> Result<()> {
         )?;
     }
     let (stop, receiver) = tokio::sync::watch::channel(false);
+    let transcription = transcription::Service::start(&config_path, receiver.clone()).await?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let web = if config.management.is_some() {
-        Some(control::bind(&config_path, receiver.clone()).await?)
+        Some(control::bind(&config_path, receiver.clone(), transcription.clone()).await?)
     } else {
         None
     };
@@ -113,6 +116,7 @@ async fn main() -> Result<()> {
             .management
             .as_ref()
             .map(|manager| format!("http://{}", manager.listen)),
+        transcription: transcription.clone(),
     };
 
     let app = Router::new()
@@ -139,6 +143,7 @@ async fn main() -> Result<()> {
         result = shutdown_signal() => {
             result?;
             stop.send(true).context("无法通知服务停止")?;
+            transcription.finish_shutdown().await?;
             services.await
         }
     }
@@ -176,7 +181,11 @@ async fn health(
 }
 
 async fn proxy(State(state): State<AppState>, req: Request) -> Response {
-    let config = load_router_runtime_config(state.runtime_routing_config.as_ref());
+    let config = if let Some(token) = req.headers().get(transcription::TASK_HEADER) {
+        state.transcription.runtime(token).await
+    } else {
+        load_router_runtime_config(state.runtime_routing_config.as_ref()).map(Arc::new)
+    };
     let result = match &config {
         Ok(config) => proxy_inner(state, req, config).await,
         Err(error) => Err(anyhow::anyhow!("{error:#}")),

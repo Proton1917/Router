@@ -169,10 +169,15 @@ pub struct Management {
     pub mods: Option<crate::mods::ModConfig>,
     #[serde(default)]
     pub context_discovery: Option<crate::context_limits::ContextDiscovery>,
+    #[serde(default)]
+    pub transcription: Option<crate::transcription::Settings>,
 }
 
 impl Management {
     pub fn validate(&self) -> Result<()> {
+        if let Some(settings) = &self.transcription {
+            settings.validate()?;
+        }
         if let Some(discovery) = &self.context_discovery {
             ensure!(
                 !discovery.adapter.program.trim().is_empty(),
@@ -682,7 +687,7 @@ fn token(path: &Path, manager: &Management) -> Result<String> {
 }
 
 #[derive(Clone)]
-struct ControlState {
+pub(crate) struct ControlState {
     path: Arc<PathBuf>,
     token: Arc<String>,
     authority: String,
@@ -691,9 +696,10 @@ struct ControlState {
     changes: tokio::sync::watch::Receiver<Value>,
     shutdown: tokio::sync::watch::Receiver<bool>,
     _watcher: Arc<std::sync::Mutex<notify::RecommendedWatcher>>,
+    pub(crate) transcription: Arc<crate::transcription::Service>,
 }
 
-struct ApiError(anyhow::Error);
+pub(crate) struct ApiError(anyhow::Error);
 impl<E: Into<anyhow::Error>> From<E> for ApiError {
     fn from(error: E) -> Self {
         Self(error.into())
@@ -1060,6 +1066,7 @@ async fn backend_probe(
 pub async fn bind(
     path: &Path,
     shutdown: tokio::sync::watch::Receiver<bool>,
+    transcription: Arc<crate::transcription::Service>,
 ) -> Result<(tokio::net::TcpListener, Router)> {
     let value = load_value(path)?;
     let manager = management(&value)?;
@@ -1073,8 +1080,10 @@ pub async fn bind(
         changes: changes_receiver,
         shutdown,
         _watcher: Arc::new(std::sync::Mutex::new(watcher)),
+        transcription,
     };
     let api = Router::new()
+        .merge(crate::transcription::routes())
         .route("/state", get(state))
         .route("/changes", get(changes))
         .route("/preview", post(preview))

@@ -252,6 +252,13 @@ impl RouterConfig {
     fn validate(&self) -> Result<()> {
         if let Some(management) = &self.management {
             management.validate()?;
+            if let Some(settings) = &management.transcription {
+                for model in settings.models.values() {
+                    if !self.profiles.contains_key(&model.profile) {
+                        bail!("转写模型引用不存在的配置：{}", model.profile);
+                    }
+                }
+            }
         }
         if self.schema_version != 2 {
             bail!("schema_version must be 2");

@@ -1,0 +1,17 @@
+{
+  "project": "Router 语音转写",
+  "title": "Router 语音转写界面",
+  "roots": ["command", "workspace"],
+  "note": "截图来自本机实际页面。转写与模型设置在隔离服务验证，启动命令和桌面入口来自已安装应用。示例录音来自 CAiRE/ASCEND test 第 400 条（CC-BY-SA-4.0）。",
+  "nodes": [
+    {"id":"command","title":"SPT 启动命令","image":"screenshots/spt-command.jpg","kind":"桌面页面","route":"启动命令","state":"显示命令、默认模型与服务","evidence":"observed"},
+    {"id":"workspace","title":"选择音频或图片","image":"screenshots/transcription-ready.jpg","kind":"桌面页面","route":"语音转写","state":"配置已生效，等待选择文件","evidence":"observed"},
+    {"id":"settings","title":"转写模型与资源设置","image":"screenshots/transcription-settings.jpg","kind":"弹窗","route":"语音转写 / 转写设置","state":"选择模型、修改资源与保留设置，保存草稿并应用","evidence":"observed"},
+    {"id":"result","title":"任务结果与正文预览","image":"screenshots/transcription-result.jpg","kind":"页面状态","route":"语音转写 / 任务记录","state":"真实音频转写完成，提供正文及导出入口","evidence":"observed"}
+  ],
+  "edges": [
+    {"from":"command","to":"workspace","action":"转写模型与参数","evidence":"source"},
+    {"from":"workspace","to":"settings","action":"转写设置","back":"保存草稿或取消","evidence":"observed"},
+    {"from":"workspace","to":"result","action":"选择文件 → 开始处理 → 预览文字稿","back":"关闭文字稿","evidence":"observed"}
+  ]
+}

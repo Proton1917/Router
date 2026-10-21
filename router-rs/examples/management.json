@@ -15,6 +15,15 @@
   },
   "backend_protocols": {"messages": ["messages"], "responses": ["responses"]},
   "templates": {
+    "spt": {
+      "label": "SPT · 语音转写与 OCR",
+      "description": "通过 Router 后台处理媒体，在原文件旁保存 Markdown。",
+      "program": "python3",
+      "args": ["{{ config.management.assets_directory }}/../scripts/spt-launch.py"],
+      "deferred": true,
+      "env": {"ROUTER_SPT": "1"},
+      "model_flags": []
+    },
     "messages-client": {
       "label": "Claude Code API",
       "supports_mods": true,
@@ -84,7 +93,7 @@
       "unset_env": ["OPENAI_API_KEY", "OPENAI_BASE_URL"]
     }
   },
-  "commands": {},
+  "commands": {"spt":{"template":"spt","label":"语音转写与图片识别","enabled":true}},
   "mods": {
     "adapter": {"program":"python3", "args":["{{ config_directory }}/application/scripts/claude-mods.py"]},
     "timeout_ms": 45000,

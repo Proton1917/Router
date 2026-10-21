@@ -1,0 +1,21 @@
+{
+  "program": "application/bin/spt-core",
+  "engine_config": "application/examples/spt-engine.toml",
+  "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+  "ffprobe": "/opt/homebrew/bin/ffprobe",
+  "directory": "transcriptions",
+  "models": {},
+  "default_model": "",
+  "engine_options": {"chunk_seconds": 120, "max_output_tokens": 16000, "split_output_tokens": 12000, "retries": 3},
+  "transcription_prompt": "完整听取所附音频，逐字转写全部可辨识语音。中文使用简体，其他语言保留原文。保留原话、数字、专名、否定和条件，不补充音频中没有的内容。只返回符合所给 JSON Schema 的结果。",
+  "max_upload_bytes": 268435456,
+  "max_storage_bytes": 3221225472,
+  "max_temp_bytes_per_job": 536870912,
+  "max_result_bytes": 8388608,
+  "max_jobs": 64,
+  "max_concurrent_jobs": 1,
+  "max_job_seconds": 86400,
+  "retention_days": 30,
+  "cleanup_seconds": 60,
+  "cancel_grace_seconds": 10
+}

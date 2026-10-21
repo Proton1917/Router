@@ -55,6 +55,12 @@ Homebrew 会自动添加项目的 Tap。升级桌面应用使用 `brew upgrade -
 git clone https://github.com/Proton1917/Router.git
 cd Router
 npm ci --prefix desktop
+# 准备支持 worker 协议 v1 的 SPT 源码，构建其 release 程序。
+cargo build --release --locked --manifest-path /path/to/speech-to-text/Cargo.toml
+mkdir -p bin
+install -m 755 /path/to/speech-to-text/target/release/spt bin/spt-core
+cp /path/to/speech-to-text/LICENSE bin/SPT-LICENSE
+cp -R /path/to/speech-to-text/licenses bin/spt-licenses
 npm run build --prefix desktop
 ```
 
@@ -62,7 +68,7 @@ npm run build --prefix desktop
 
 开发时运行 `npm run dev --prefix desktop`。先执行 `npm run prepare:bundle --prefix desktop` 可以准备直接运行 Cargo 检查所需的资源。
 
-发行构建会将源码、Cargo 依赖及 Rust 工具链路径映射为通用路径。`desktop/resources.json` 明确列出安装包资源。安装包包含项目许可证和 `THIRD_PARTY_NOTICES.txt`；构建前会核对许可声明对应的依赖锁文件。
+发行构建会将源码、Cargo 依赖及 Rust 工具链路径映射为通用路径。`desktop/resources.json` 明确列出安装包资源。安装包包含 Router、SPT 引擎、配置示例与相应许可声明。FFmpeg 和 FFprobe 使用本机安装，可在转写设置中指定绝对路径。
 
 修改依赖锁文件后，使用 cargo-about 更新许可声明：
 
@@ -145,7 +151,7 @@ router config check
 
 命令名称来自 `management.commands`。每个命令可以选择启动方式、默认模型、可选模型列表、附加参数和环境变量。启动方式定义程序、参数、模型参数标记、API 请求标记及可选的启动器集成。模板使用 MiniJinja，提供 `config`、`command_name`、`command`、`model`、`profile`、`gateway_url`、`command_header` 和 `headers_text` 等变量。
 
-`router web` 按照 `management.browser` 打开本机配置页面，示例使用 Safari。转发入口与网页入口由同一个 Rust 进程提供，关闭浏览器后继续运行。网页包括启动命令、API 后端、模型配置、路由规则、启动方式、服务设置、客户端接入和 Mods 管理。常用参数使用表单编辑，完整 JSON 编辑保留全部配置能力。
+`router web` 按照 `management.browser` 打开本机配置页面，示例使用 Safari。转发入口与网页入口由同一个 Rust 进程提供，关闭浏览器后继续运行。网页包括启动命令、API 后端、模型配置、路由规则、启动方式、服务设置、客户端接入、Mods 管理和语音转写。常用参数使用表单编辑，完整 JSON 编辑保留全部配置能力。
 
 页面打开时读取配置，并通过经过认证的事件流接收配置变更通知。文件变更由操作系统通知触发，适用于网页、CLI 和外部编辑器保存的配置。存在未保存草稿或打开的编辑窗口时，页面保留当前编辑并提示有新配置。正常页面不显示服务连接过程或在线状态；读取、保存及主动检查发生错误时显示具体原因。
 
@@ -339,6 +345,35 @@ claude --model '<model-id>'
 ```
 
 示例配置会移除客户端传入的认证请求头，随后注入 router 自己读取的上游凭据。
+
+## 语音转写与图片识别
+
+打开 Router 的“语音转写”页面，在“转写设置”中添加支持音频输入及结构化输出的模型，保存草稿并应用修改。选择或拖入录音、选择模型和文字处理方式后，点击“开始处理”。图片 OCR 使用同一页面的“图片文字识别”选项，需要模型支持图片输入。
+
+任务记录实时展示阶段和已完成的音频时长。完成后可预览说话人及正文，导出 Markdown 或包含时间范围、发言和用量的 JSON。模型实际返回的标识与用量位于预览中的“模型与用量”；上游未提供的费用显示为未报告。
+
+Router 后台按配置排队并启动独立 SPT 工作进程。关闭网页或桌面窗口后任务继续执行；停止或重启 Router 服务会中断任务，并在记录中明确显示。取消任务会停止模型请求和媒体子进程。每个任务使用创建时固定的路由与处理参数，后续配置修改作用于新任务。
+
+上传文件和临时音频在成功、失败或受控取消后清理。服务启动时清理遗留媒体，并将未完成记录标为中断。结果按配置的天数保留，也可在任务记录中删除。转写设置可调整单文件上限、总存储上限、临时空间、并发数、任务数量、保留天数、分段参数、输出 tokens 和重试次数；达到限制时显示具体原因。
+
+`management.transcription` 保存引擎路径、可用模型、资源及保留设置；通用引擎参数来自 `router-rs/examples/spt-engine.toml`。任务配置只保存凭据引用，模型请求使用 Router 的后端认证。工作进程接口为 SPT `worker` 协议 v1，通过 `SPT_CONFIG_PATH` 读取独立 TOML，stdout 输出 JSON Lines 事件，结果写入任务目录。已有 `spt` CLI 继续可用。
+
+“启动命令”中的 `spt` 与语音转写页面共用配置。可以修改命令名称和启动参数，点击卡片上的“转写模型与参数”管理模型。终端的常用调用如下，任务也会出现在页面记录中：
+
+```sh
+spt "会议录音.m4a"
+spt --raw "会议录音.m4a"
+spt --force "会议录音.m4a"
+spt ocr "扫描图片.png"
+spt models
+spt --model
+spt --model '<已配置的模型名称>'
+spt config
+```
+
+默认输出原目录的同名 `.md`；`--raw` 输出 `.raw.md`，OCR 输出 `.ocr.md`。`--force` 在完整结果就绪后替换已有普通文件。Ctrl+C 会请求取消后台任务。模型选择持久保存在 Router 配置中。终端包装脚本需要 Python 3，SPT 工作进程执行媒体处理和转写。独立 `spt-core` CLI 可继续用于原有专用 ASR 目录等命令。
+
+首次安装需提供 FFmpeg 与 FFprobe，例如通过 Homebrew 安装 `ffmpeg`，然后在转写设置中填写本机路径。桌面安装包提供 SPT 引擎；命令行安装可将同一引擎放入自己的安装目录，并在页面配置其位置。任务目录修改后需要重启 Router。
 
 ## 项目初始化
 

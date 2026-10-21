@@ -328,6 +328,14 @@ fn initialize(
     let installation = directory.join("application");
     fs::create_dir_all(installation.join("bin"))?;
     fs::copy(source.join("router"), installation.join("bin/router"))?;
+    fs::copy(source.join("spt-core"), installation.join("bin/spt-core"))?;
+    fs::copy(source.join("SPT-LICENSE"), installation.join("SPT-LICENSE"))?;
+    copy_directory(&source.join("spt-licenses"), &installation.join("spt-licenses"))?;
+    fs::create_dir_all(installation.join("examples"))?;
+    fs::copy(
+        source.join("examples/spt-engine.toml"),
+        installation.join("examples/spt-engine.toml"),
+    )?;
     copy_directory(&source.join("web"), &installation.join("web"))?;
     copy_directory(&source.join("scripts"), &installation.join("scripts"))?;
     for name in ["LICENSE", "THIRD_PARTY_NOTICES.txt"] {

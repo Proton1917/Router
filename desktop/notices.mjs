@@ -1,11 +1,10 @@
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const inputs = process.argv.slice(2);
-if (inputs.length !== 2) throw new Error('请传入 router 与桌面项目的 cargo-about JSON 报告。');
+if (inputs.length < 2) throw new Error('请传入 router 与桌面项目的许可 JSON 报告，可追加其他依赖报告。');
 const sections = new Map();
 function add(id, content, names) {
   if (!content || !id || !names.length) throw new Error('许可声明内容不完整。');
@@ -45,7 +44,4 @@ const ordered = [...sections.values()].map(section => ({ ...section, names: [...
 const output = ['Router — Third-Party Notices', '', 'This distribution includes software under the following licenses.', 'The Router project license is provided in LICENSE.', ''];
 for (const section of ordered) output.push(section.id, section.names.join('\n'), '', section.content.trim(), '');
 writeFileSync(`${root}desktop/THIRD_PARTY_NOTICES.txt`, output.join('\n') + '\n');
-const locks = ['router-rs/Cargo.lock', 'desktop/src-tauri/Cargo.lock', 'web/package-lock.json'];
-const files = Object.fromEntries(locks.map(path => [path, createHash('blake2b512').update(readFileSync(root + path)).digest('hex')]));
-writeFileSync(`${root}desktop/notices-lock.json`, JSON.stringify({ algorithm: 'blake2b512', files }, null, 2) + '\n');
 console.log(`已生成 ${ordered.length} 组许可声明，包含 ${visited.size} 个网页运行依赖。`);
