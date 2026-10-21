@@ -4,6 +4,8 @@
 
 请求在配置的客户端规则、模型规则和后端之间分发。Responses 请求及其 SSE 响应按原生协议转发，工具调用、推理内容、用量和错误响应保留上游格式。Messages 可按配置启用字段处理、搜索工具适配、模型目录和流式响应兼容处理。
 
+Tauri 桌面控制台和网页可管理 API、模型、上下文预算、启动命令与客户端接入。语音转写页面和 `spt` 命令共用任务队列，支持音频转写、图片 OCR、处理进度、取消和结果导出。模型与后端配置保存在外部 JSON 中。
+
 ## 安装桌面控制台
 
 桌面版使用 Tauri 2 和 macOS 自带的 WebKit。当前提供 macOS 14 及以上版本的安装流程，已验证 Apple Silicon。应用包含 router 程序、网页和首次安装所需的配置示例，使用安装包时无需安装 Rust 或 Node.js。
@@ -17,9 +19,9 @@ open -a Router
 
 Homebrew 会自动添加项目的 Tap。升级桌面应用使用 `brew upgrade --cask Proton1917/tap/router`，卸载使用 `brew uninstall --cask Proton1917/tap/router`。已部署的后台程序、网页资源、配置和凭据保存在所选配置目录中，关闭或卸载桌面应用后会保留；后台程序和网页资源的升级步骤见下文“升级与文件位置”。
 
-在 [Releases](https://github.com/Proton1917/Router/releases) 下载 `Router_0.3.0_aarch64.dmg` 和 `SHA256SUMS.txt`。将两个文件放在同一目录，执行 `shasum -a 256 -c SHA256SUMS.txt` 校验下载完整性，再执行以下安装步骤。也可以按下文“从源码构建桌面安装包”自行构建。
+在 [Releases](https://github.com/Proton1917/Router/releases) 下载 `Router_0.4.0_aarch64.dmg` 和 `SHA256SUMS.txt`。将两个文件放在同一目录，执行 `shasum -a 256 -c SHA256SUMS.txt` 校验下载完整性，再执行以下安装步骤。也可以按下文“从源码构建桌面安装包”自行构建。
 
-1. 打开 `Router_0.3.0_aarch64.dmg`，将 **Router.app** 拖入“应用程序”。
+1. 打开 `Router_0.4.0_aarch64.dmg`，将 **Router.app** 拖入“应用程序”。
 2. 打开 Router。首次使用可以选择“创建新配置”，也可以通过“选择已有配置文件”接入已有 `router.json`。已有配置需包含 `management`，网页资源路径需存在。
 3. 创建配置时确认配置目录、终端入口目录和两个监听地址，点击“安装并打开控制台”。默认分别为 `~/.config/router`、`~/.local/bin`、`127.0.0.1:8080` 和 `127.0.0.1:8081`。已有文件或端口冲突会显示具体错误。
 4. 保持“自动配置 Zsh 终端入口”选中，会在 `~/.zshrc` 添加初始化语句并备份原文件。重新打开终端后，`router` 及以后在界面新增的命令即可使用。
@@ -55,12 +57,15 @@ Homebrew 会自动添加项目的 Tap。升级桌面应用使用 `brew upgrade -
 git clone https://github.com/Proton1917/Router.git
 cd Router
 npm ci --prefix desktop
-# 准备支持 worker 协议 v1 的 SPT 源码，构建其 release 程序。
-cargo build --release --locked --manifest-path /path/to/speech-to-text/Cargo.toml
+# 下载本版本配套的 SPT worker 源码，并构建其 release 程序。
+mkdir -p .work/spt-source
+curl -fL https://github.com/Proton1917/Router/releases/download/v0.4.0/spt-worker-6f5af7f.tar.gz -o .work/spt-worker.tar.gz
+tar -xzf .work/spt-worker.tar.gz -C .work/spt-source --strip-components=1
+cargo build --release --locked --manifest-path .work/spt-source/Cargo.toml
 mkdir -p bin
-install -m 755 /path/to/speech-to-text/target/release/spt bin/spt-core
-cp /path/to/speech-to-text/LICENSE bin/SPT-LICENSE
-cp -R /path/to/speech-to-text/licenses bin/spt-licenses
+install -m 755 .work/spt-source/target/release/spt bin/spt-core
+cp .work/spt-source/LICENSE bin/SPT-LICENSE
+cp -R .work/spt-source/licenses bin/spt-licenses
 npm run build --prefix desktop
 ```
 
@@ -68,7 +73,7 @@ npm run build --prefix desktop
 
 开发时运行 `npm run dev --prefix desktop`。先执行 `npm run prepare:bundle --prefix desktop` 可以准备直接运行 Cargo 检查所需的资源。
 
-发行构建会将源码、Cargo 依赖及 Rust 工具链路径映射为通用路径。`desktop/resources.json` 明确列出安装包资源。安装包包含 Router、SPT 引擎、配置示例与相应许可声明。FFmpeg 和 FFprobe 使用本机安装，可在转写设置中指定绝对路径。
+发行构建会将源码、Cargo 依赖及 Rust 工具链路径映射为通用路径。`desktop/resources.json` 明确列出安装包资源。安装包包含 Router、SPT 引擎、配置示例与相应许可声明。SPT 来自 [speech-to-text](https://github.com/Proton1917/speech-to-text)，本版本配套源码对应提交 `6f5af7fc9f2de152dcc839a7d008258df0e74ec0`，随 Release 一同分发，采用 MIT 许可证；其第三方许可材料保存在源码与安装包的 `spt-licenses` 中。FFmpeg 和 FFprobe 使用本机安装，可在转写设置中指定绝对路径。
 
 修改依赖锁文件后，使用 cargo-about 更新许可声明：
 
