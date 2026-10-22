@@ -17,6 +17,7 @@ use crate::{
 
 pub async fn dispatch(path: &Path, command: RouterCommand) -> Result<()> {
     match command {
+        RouterCommand::OauthToken { .. } => unreachable!("handled before config loading"),
         RouterCommand::Serve => unreachable!("serve is handled by main"),
         RouterCommand::Web { no_open, restart } => {
             if restart {

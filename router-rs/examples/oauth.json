@@ -1,0 +1,11 @@
+{
+  "provider": "xAI",
+  "flow": "device_code",
+  "client_id": "b1a00492-073a-47ea-816f-4c329264a828",
+  "token_url": "https://auth.x.ai/oauth2/token",
+  "device_authorization_url": "https://auth.x.ai/oauth2/device/code",
+  "authorization_url": "https://auth.x.ai/oauth2/authorize",
+  "redirect_uri": "http://127.0.0.1:0/oauth/callback",
+  "scopes": ["openid", "profile", "email", "offline_access", "grok-cli:access", "api:access"],
+  "credential_file": "/absolute/path/outside-repository/xai-oauth.json"
+}

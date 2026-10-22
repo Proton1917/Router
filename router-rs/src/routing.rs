@@ -244,7 +244,39 @@ struct MatchBody<'a> {
 
 impl RouterConfig {
     pub fn from_json(bytes: &[u8]) -> Result<Self> {
-        let config: Self = serde_json::from_slice(bytes).context("config must be valid JSON")?;
+        let mut config: Self =
+            serde_json::from_slice(bytes).context("config must be valid JSON")?;
+        let mut catalog_routes = Vec::new();
+        for client in &config.runtime.clients {
+            let mut commands = HashSet::new();
+            for name in &client.catalog_commands {
+                if !commands.insert(name) {
+                    bail!("client {} repeats catalog command {name}", client.id);
+                }
+                let command = config
+                    .management
+                    .as_ref()
+                    .and_then(|m| m.commands.get(name))
+                    .with_context(|| {
+                        format!(
+                            "client {} references missing catalog command {name}",
+                            client.id
+                        )
+                    })?;
+                for binding in command
+                    .model_bindings
+                    .iter()
+                    .filter(|binding| binding.visible)
+                {
+                    catalog_routes.push(serde_json::from_value::<RouteRule>(serde_json::json!({
+                        "id":format!("catalog-{}-{name}-{}", client.id, binding.id),
+                        "match":{"contexts":[client.id], "models":[format!("{name}/{}", binding.model)]},
+                        "profile":binding.profile
+                    }))?);
+                }
+            }
+        }
+        config.routes.splice(0..0, catalog_routes);
         config.validate()?;
         Ok(config)
     }
@@ -537,6 +569,15 @@ impl RouterConfig {
             (Some(_), Some(_)) => unreachable!("validated destination"),
         };
 
+        let mut field_policy = destination.field_policy.clone();
+        for source in &self.runtime.selection.speed_sources {
+            if source.consume
+                && source.applies_to(context)
+                && !field_policy.remove.contains(&source.pointer)
+            {
+                field_policy.remove.push(source.pointer.clone());
+            }
+        }
         Ok(ResolvedRoute {
             rule_id: route.id.clone(),
             target: destination.target.clone(),
@@ -551,7 +592,7 @@ impl RouterConfig {
             payload_normalization: destination.payload_normalization.clone(),
             synthesize_anthropic_sse,
             response_cache_ttl_seconds: destination.response_cache_ttl_seconds,
-            field_policy: destination.field_policy.clone(),
+            field_policy,
             header_policy: destination.header_policy.clone(),
         })
     }

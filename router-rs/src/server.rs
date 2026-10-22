@@ -19,6 +19,12 @@ pub struct Arguments {
 
 #[derive(Debug, Subcommand)]
 pub enum RouterCommand {
+    /// 为本机适配程序读取 OAuth 凭据；输出包含访问令牌
+    #[command(hide = true)]
+    OauthToken {
+        #[arg(long)]
+        settings: String,
+    },
     /// 启动转发服务
     Serve,
     /// 启动 router 并打开管理页面

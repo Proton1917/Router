@@ -41,6 +41,7 @@
 /router-rs/examples/*
 !/router-rs/examples/router.json
 !/router-rs/examples/management.json
+!/router-rs/examples/oauth.json
 !/router-rs/examples/spt-engine.toml
 /router-rs/target/
 /router-rs/.work/

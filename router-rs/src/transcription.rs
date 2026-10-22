@@ -801,6 +801,16 @@ fn absolutize_runtime(value: &mut Value, config: &Path) -> Result<()> {
         .context("后端配置不存在")?
         .values_mut()
     {
+        for pointer in [
+            "/auth/oauth/credential_file",
+            "/auth/oauth/client_secret_file",
+        ] {
+            if let Some(file) = backend.pointer_mut(pointer)
+                && let Some(path) = file.as_str()
+            {
+                *file = json!(control::resolve_path(config, Path::new(path)));
+            }
+        }
         if let Some(file) = backend.pointer_mut("/auth/token_file")
             && let Some(path) = file.as_str()
         {

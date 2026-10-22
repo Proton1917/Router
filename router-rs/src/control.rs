@@ -688,7 +688,7 @@ fn token(path: &Path, manager: &Management) -> Result<String> {
 
 #[derive(Clone)]
 pub(crate) struct ControlState {
-    path: Arc<PathBuf>,
+    pub(crate) path: Arc<PathBuf>,
     token: Arc<String>,
     authority: String,
     lock: Arc<Mutex<()>>,
@@ -1083,6 +1083,7 @@ pub async fn bind(
         transcription,
     };
     let api = Router::new()
+        .merge(crate::oauth::routes())
         .merge(crate::transcription::routes())
         .route("/state", get(state))
         .route("/changes", get(changes))

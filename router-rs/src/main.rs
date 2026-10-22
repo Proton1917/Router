@@ -22,6 +22,7 @@ mod context_limits;
 mod control;
 mod integrations;
 mod mods;
+mod oauth;
 mod prepare;
 mod routing;
 mod runtime;
@@ -54,6 +55,12 @@ struct ClientSettings {
 #[tokio::main]
 async fn main() -> Result<()> {
     let arguments = Arguments::parse();
+    if let Some(server::RouterCommand::OauthToken { settings }) = &arguments.command {
+        let settings: oauth::Settings = serde_json::from_str(settings)?;
+        settings.validate()?;
+        println!("{}", oauth::access_token(&settings).await?);
+        return Ok(());
+    }
     if arguments.command.is_none() && !arguments.check {
         Arguments::command().print_help()?;
         println!();
@@ -237,6 +244,39 @@ async fn proxy_inner(
     let word_gateway = client.word_gateway;
     if method == Method::OPTIONS {
         return cors_preflight_response(&headers, &runtime_config.runtime.cors);
+    }
+
+    if method == Method::GET && protocol == Protocol::Models && !client.catalog_commands.is_empty()
+    {
+        let manager = runtime_config
+            .management
+            .as_ref()
+            .context("模型目录缺少管理配置")?;
+        let mut models = Vec::new();
+        for name in &client.catalog_commands {
+            for binding in manager.commands[name]
+                .model_bindings
+                .iter()
+                .filter(|binding| binding.visible)
+            {
+                let profile = &runtime_config.profiles[&binding.profile];
+                let label = if binding.label.is_empty() {
+                    profile.standard.model.as_deref().unwrap_or(&binding.model)
+                } else {
+                    &binding.label
+                };
+                models.push(serde_json::json!({
+                    "id":format!("{name}/{}", runtime_config.runtime.selection.normalize_model_id(&binding.model)), "object":"model", "type":"model",
+                    "name":format!("{label} · {name}"), "display_name":format!("{label} · {name}"),
+                    "owned_by":"router", "context_window":binding.context_window,
+                    "supported_endpoint_types":manager.backend_protocols.get(&profile.standard.target)
+                }));
+            }
+        }
+        return Ok(
+            axum::Json(serde_json::json!({"object":"list","data":models,"has_more":false}))
+                .into_response(),
+        );
     }
 
     if word_gateway && method == Method::GET && protocol == Protocol::Models {
@@ -485,6 +525,8 @@ async fn read_backend_token(auth: &AuthConfig) -> Result<String> {
             .with_context(|| format!("credential environment variable {name} is not set"))?
     } else if let Some(path) = &auth.token_file {
         fs::read_to_string(path).context("failed to read configured credential file")?
+    } else if let Some(settings) = &auth.oauth {
+        oauth::access_token(settings).await?
     } else {
         let output = tokio::process::Command::new(&auth.token_command[0])
             .args(&auth.token_command[1..])

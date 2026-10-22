@@ -66,6 +66,8 @@ pub struct AuthConfig {
     #[serde(default)]
     pub token_command: Vec<String>,
     #[serde(default)]
+    pub oauth: Option<crate::oauth::Settings>,
+    #[serde(default)]
     pub error_hint: Option<String>,
     pub headers: HashMap<String, String>,
 }
@@ -138,6 +140,8 @@ impl HeaderPredicate {
 #[serde(deny_unknown_fields)]
 pub struct ClientConfig {
     pub id: String,
+    #[serde(default)]
+    pub catalog_commands: Vec<String>,
     #[serde(default)]
     pub paths: Vec<String>,
     #[serde(default)]
@@ -277,6 +281,8 @@ pub struct SpeedSource {
     pub pointer: String,
     pub fast_values: Vec<String>,
     #[serde(default)]
+    pub consume: bool,
+    #[serde(default)]
     pub contexts: Vec<String>,
 }
 
@@ -309,16 +315,17 @@ impl SelectionPolicy {
     }
 
     pub fn model_ids_match(&self, left: &str, right: &str) -> bool {
-        let normalize = |value: &str| {
-            let value = value.to_ascii_lowercase();
-            for suffix in &self.ignored_model_suffixes {
-                if let Some(stripped) = value.strip_suffix(&suffix.to_ascii_lowercase()) {
-                    return stripped.to_string();
-                }
+        self.normalize_model_id(left) == self.normalize_model_id(right)
+    }
+
+    pub fn normalize_model_id(&self, value: &str) -> String {
+        let value = value.to_ascii_lowercase();
+        for suffix in &self.ignored_model_suffixes {
+            if let Some(stripped) = value.strip_suffix(&suffix.to_ascii_lowercase()) {
+                return stripped.to_string();
             }
-            value
-        };
-        normalize(left) == normalize(right)
+        }
+        value
     }
 }
 
@@ -394,6 +401,12 @@ impl RuntimeConfig {
                 if let Some(program) = auth.token_command.first_mut() {
                     resolve(program);
                 }
+                if let Some(oauth) = &mut auth.oauth {
+                    resolve(&mut oauth.credential_file);
+                    if let Some(path) = &mut oauth.client_secret_file {
+                        resolve(path);
+                    }
+                }
             }
         }
         for client in &mut self.clients {
@@ -445,12 +458,16 @@ impl RuntimeConfig {
             if let Some(auth) = &backend.auth {
                 let sources = usize::from(auth.token_env.is_some())
                     + usize::from(auth.token_file.is_some())
-                    + usize::from(!auth.token_command.is_empty());
+                    + usize::from(!auth.token_command.is_empty())
+                    + usize::from(auth.oauth.is_some());
                 if sources != 1 || auth.headers.is_empty() {
                     bail!("backend {id} auth needs exactly one token source and nonempty headers");
                 }
                 if let Some(name) = &auth.token_env {
                     validate_env_name(name)?;
+                }
+                if let Some(oauth) = &auth.oauth {
+                    oauth.validate()?;
                 }
                 if auth
                     .token_file

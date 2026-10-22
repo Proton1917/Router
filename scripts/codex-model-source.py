@@ -33,6 +33,12 @@ for target, wanted in targets.items():
             token = os.environ[auth['token_env']]
         elif auth.get('token_command'):
             token = subprocess.run(auth['token_command'], check=True, capture_output=True, text=True).stdout.strip()
+        elif auth.get('oauth'):
+            settings = dict(auth['oauth'])
+            for key in ('credential_file', 'client_secret_file'):
+                if settings.get(key) and not Path(settings[key]).is_absolute():
+                    settings[key] = str(path.parent / settings[key])
+            token = subprocess.run([os.environ['ROUTER_EXECUTABLE'], 'oauth-token', '--settings', json.dumps(settings)], check=True, capture_output=True, text=True, timeout=75).stdout.strip()
         else:
             raise ValueError('目录后端缺少凭据来源：' + target)
         if not token:

@@ -260,6 +260,7 @@ pub fn adapt(
                 .collect::<Result<Vec<_>>>()?,
         )
         .envs(&*environment)
+        .env("ROUTER_EXECUTABLE", std::env::current_exe()?)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

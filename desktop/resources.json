@@ -5,6 +5,7 @@
   "router-rs/target/release/router": "router",
   "router-rs/examples/router.json": "examples/router.json",
   "router-rs/examples/management.json": "examples/management.json",
+  "router-rs/examples/oauth.json": "examples/oauth.json",
   "router-rs/examples/spt-engine.toml": "examples/spt-engine.toml",
   "bin/spt-core": "spt-core",
   "bin/SPT-LICENSE": "SPT-LICENSE",

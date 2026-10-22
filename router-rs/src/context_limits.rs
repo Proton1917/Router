@@ -33,6 +33,7 @@ pub fn discover(path: &Path, config: &Value, name: Option<&str>, refresh: bool) 
                 .collect::<Result<Vec<_>>>()?,
         )
         .stdin(Stdio::piped())
+        .env("ROUTER_EXECUTABLE", std::env::current_exe()?)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

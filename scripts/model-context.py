@@ -66,6 +66,12 @@ class Discovery:
                 token = os.environ[auth['token_env']]
             elif auth.get('token_command'):
                 token = subprocess.run(auth['token_command'], check=True, capture_output=True, text=True, timeout=self.settings['timeout_seconds']).stdout.strip()
+            elif auth.get('oauth'):
+                settings = dict(auth['oauth'])
+                for key in ('credential_file', 'client_secret_file'):
+                    if settings.get(key) and not Path(settings[key]).is_absolute():
+                        settings[key] = str(self.directory / settings[key])
+                token = subprocess.run([os.environ['ROUTER_EXECUTABLE'], 'oauth-token', '--settings', json.dumps(settings)], check=True, capture_output=True, text=True, timeout=75).stdout.strip()
             if auth and not token:
                 raise ValueError('目录凭据不可用：' + target)
             self.headers[target] = {name: text.format(token=token) for name, text in source.get('auth_headers', auth.get('headers', {})).items()}

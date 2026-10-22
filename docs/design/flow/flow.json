@@ -1,17 +1,20 @@
 {
-  "project": "Router 语音转写",
-  "title": "Router 语音转写界面",
-  "roots": ["command", "workspace"],
-  "note": "截图来自本机实际页面。转写与模型设置在隔离服务验证，启动命令和桌面入口来自已安装应用。示例录音来自 CAiRE/ASCEND test 第 400 条（CC-BY-SA-4.0）。",
+  "project": "Router",
+  "title": "Router 控制台界面",
+  "roots": ["command", "workspace", "oauth-settings"],
+  "note": "截图来自本机实际页面。OAuth 参数保存、登录和刷新使用真实 xAI 服务验证。语音转写沿用既有验证截图，示例录音来自 CAiRE/ASCEND test 第 400 条（CC-BY-SA-4.0）。",
   "nodes": [
     {"id":"command","title":"SPT 启动命令","image":"screenshots/spt-command.jpg","kind":"桌面页面","route":"启动命令","state":"显示命令、默认模型与服务","evidence":"observed"},
     {"id":"workspace","title":"选择音频或图片","image":"screenshots/transcription-ready.jpg","kind":"桌面页面","route":"语音转写","state":"配置已生效，等待选择文件","evidence":"observed"},
     {"id":"settings","title":"转写模型与资源设置","image":"screenshots/transcription-settings.jpg","kind":"弹窗","route":"语音转写 / 转写设置","state":"选择模型、修改资源与保留设置，保存草稿并应用","evidence":"observed"},
-    {"id":"result","title":"任务结果与正文预览","image":"screenshots/transcription-result.jpg","kind":"页面状态","route":"语音转写 / 任务记录","state":"真实音频转写完成，提供正文及导出入口","evidence":"observed"}
+    {"id":"result","title":"任务结果与正文预览","image":"screenshots/transcription-result.jpg","kind":"页面状态","route":"语音转写 / 任务记录","state":"真实音频转写完成，提供正文及导出入口","evidence":"observed"},
+    {"id":"oauth-settings","title":"OAuth 参数与凭据来源","image":"screenshots/oauth-settings-image-0.jpg","kind":"弹窗","route":"API 后端 / 编辑接入","state":"自由填写服务商和 OAuth 参数，保存草稿并应用后可以登录","group":"OAuth","evidence":"observed"},
+    {"id":"oauth-authorized","title":"OAuth 已登录","image":"screenshots/oauth-authorized-image-0.jpg","kind":"登录状态","route":"API 后端 / 编辑接入 / OAuth 登录","state":"显示访问令牌有效期；调用时自动刷新，可重新登录、手动刷新或退出本机账号","group":"OAuth","evidence":"observed"}
   ],
   "edges": [
     {"from":"command","to":"workspace","action":"转写模型与参数","evidence":"source"},
     {"from":"workspace","to":"settings","action":"转写设置","back":"保存草稿或取消","evidence":"observed"},
-    {"from":"workspace","to":"result","action":"选择文件 → 开始处理 → 预览文字稿","back":"关闭文字稿","evidence":"observed"}
+    {"from":"workspace","to":"result","action":"选择文件 → 开始处理 → 预览文字稿","back":"关闭文字稿","evidence":"observed"},
+    {"from":"oauth-settings","to":"oauth-authorized","action":"保存并应用参数 → 登录并打开授权页 → 完成授权","back":"编辑参数或重新登录","evidence":"observed"}
   ]
 }
