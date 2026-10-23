@@ -47,6 +47,8 @@ pub struct Destination {
     #[serde(default)]
     pub reasoning_adapter: Option<String>,
     #[serde(default)]
+    pub reasoning_models: Option<ReasoningModels>,
+    #[serde(default)]
     pub force_nonstream: bool,
     #[serde(default)]
     pub payload_normalization: PayloadNormalization,
@@ -58,6 +60,22 @@ pub struct Destination {
     pub field_policy: FieldPolicy,
     #[serde(default)]
     pub header_policy: HeaderPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReasoningModels {
+    #[serde(default)]
+    pub label: String,
+    pub models: HashMap<String, String>,
+    pub default_effort: String,
+    pub follow_request: bool,
+    #[serde(default)]
+    pub aliases: HashMap<String, String>,
+    #[serde(default)]
+    pub labels: HashMap<String, String>,
+    #[serde(default)]
+    pub remove: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
@@ -319,6 +337,14 @@ impl RouterConfig {
                 validate_destination(fast, &format!("profiles.{name}.fast"))?;
             }
             for destination in std::iter::once(&profile.standard).chain(profile.fast.iter()) {
+                if destination
+                    .reasoning_models
+                    .as_ref()
+                    .is_some_and(|policy| policy.follow_request)
+                    && self.runtime.selection.reasoning_sources.is_empty()
+                {
+                    bail!("profile {name} requires selection.reasoning_sources");
+                }
                 let backend = self
                     .runtime
                     .backends
@@ -571,7 +597,7 @@ impl RouterConfig {
                 .iter()
                 .any(|candidate| candidate.eq_ignore_ascii_case(selected))
         });
-        let outgoing_model = match (&destination.model, &destination.model_template) {
+        let mut outgoing_model = match (&destination.model, &destination.model_template) {
             (Some(model), None) => Some(model.clone()),
             (None, Some(template)) => Some(template.replace("{model}", model)),
             (None, None) => Some(model.to_string()),
@@ -579,6 +605,47 @@ impl RouterConfig {
         };
 
         let mut field_policy = destination.field_policy.clone();
+        if let Some(policy) = &destination.reasoning_models {
+            let requested = policy
+                .follow_request
+                .then(|| {
+                    self.runtime
+                        .selection
+                        .reasoning_sources
+                        .iter()
+                        .find_map(|path| body.pointer(path).and_then(Value::as_str))
+                })
+                .flatten();
+            let effort = requested.unwrap_or(&policy.default_effort);
+            let effort = policy
+                .aliases
+                .get(effort)
+                .map(String::as_str)
+                .unwrap_or(effort);
+            outgoing_model = Some(
+                policy
+                    .models
+                    .get(effort)
+                    .with_context(|| {
+                        format!(
+                            "unsupported reasoning effort {effort} for profile {}",
+                            route.profile
+                        )
+                    })?
+                    .clone(),
+            );
+            for path in self
+                .runtime
+                .selection
+                .reasoning_sources
+                .iter()
+                .chain(&policy.remove)
+            {
+                if !field_policy.remove.contains(path) {
+                    field_policy.remove.push(path.clone());
+                }
+            }
+        }
         for source in &self.runtime.selection.speed_sources {
             if source.consume
                 && source.applies_to(context)
@@ -806,6 +873,30 @@ fn validate_destination(destination: &Destination, field: &str) -> Result<()> {
         (None, Some(_)) => bail!("{field}.model_template must contain exactly one {{model}}"),
         (None, None) => {}
         (Some(_), Some(_)) => bail!("{field} cannot set both model and model_template"),
+    }
+    if let Some(policy) = &destination.reasoning_models {
+        if !policy.models.contains_key(&policy.default_effort)
+            || destination.model_template.is_some()
+        {
+            bail!(
+                "{field}.reasoning_models requires a mapped default and cannot use model_template"
+            );
+        }
+        for (effort, model) in &policy.models {
+            validate_identifier(effort, &format!("{field}.reasoning_models.models"))?;
+            validate_model_id(model, &format!("{field}.reasoning_models.models.{effort}"))?;
+        }
+        for path in &policy.remove {
+            crate::runtime::validate_pointer(path)?;
+        }
+        for (alias, effort) in &policy.aliases {
+            if alias.is_empty()
+                || !policy.models.contains_key(effort)
+                || policy.models.contains_key(alias)
+            {
+                bail!("{field}.reasoning_models contains an invalid alias {alias}");
+            }
+        }
     }
     if let Some(provider) = &destination.provider {
         validate_provider(provider, &format!("{field}.provider"))?;

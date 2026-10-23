@@ -3,7 +3,9 @@ html, body, #root { height: 100%; overflow: hidden; overscroll-behavior: none; }
 .application > main { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .application > main > .topbar { flex-shrink: 0; }
 .application > main > .page-content { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: none; }
-.application > main:not(.settings-panel) > .page-content { width: 100%; max-width: none; margin: 0; }
+.application > main:not(.settings-panel) > .page-content { width: 100%; max-width: none; margin: 0; padding-bottom: 32px; }
+.application > main:not(.settings-panel) > .page-content:has(.savebar.is-dirty) { padding-bottom: 110px; }
+.page-content > .command-grid, .page-content > .integration-grid { margin-bottom: 0; }
 .sidebar, .settings-navigation, .modal-body, .table-panel, .review-list, textarea { overscroll-behavior: none; }
 .modal > header, .modal > footer { flex-shrink: 0; }
 .modal-body { min-height: 0; }

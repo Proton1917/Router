@@ -30,6 +30,12 @@ pub struct ModelBinding {
     pub route_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u64>,
+    #[serde(default)]
+    pub compact_with_self: bool,
+    #[serde(default)]
+    pub subagents_with_self: bool,
+    #[serde(default)]
+    pub max_context: bool,
 }
 
 fn visible() -> bool {
@@ -57,6 +63,18 @@ pub fn validate(name: &str, command: &CommandSpec, template: &LaunchTemplate) ->
     let mut linked = BTreeSet::new();
     for binding in &command.model_bindings {
         control::validate_name(&binding.id)?;
+        ensure!(
+            !binding.compact_with_self || !template.compaction_routes.is_empty(),
+            "命令 {name} 的启动方式尚未声明压缩路由"
+        );
+        ensure!(
+            !binding.subagents_with_self || !template.subagent_routes.is_empty(),
+            "命令 {name} 的启动方式尚未声明子任务路由"
+        );
+        ensure!(
+            !binding.max_context || binding.context_window.is_none(),
+            "最大上下文与固定上下文不能同时设置"
+        );
         if let Some(window) = binding.context_window {
             let range = template
                 .context_window_range
@@ -138,6 +156,83 @@ pub fn materialize(value: &mut Value, managed: &mut Vec<String>) -> Result<()> {
                 }
             }
             let target = profile["standard"]["target"].clone();
+            for (purpose, enabled, definitions) in [
+                (
+                    "compact",
+                    binding.compact_with_self,
+                    &template.compaction_routes,
+                ),
+                (
+                    "subagent",
+                    binding.subagents_with_self,
+                    &template.subagent_routes,
+                ),
+            ] {
+                if !enabled {
+                    continue;
+                }
+                for before in definitions {
+                    let routes = value["routes"]
+                        .as_array_mut()
+                        .context("routes 必须为数组")?;
+                    let index = routes
+                        .iter()
+                        .position(|route| route["id"] == *before)
+                        .with_context(|| format!("压缩路由不存在：{before}"))?;
+                    let mut route = routes[index].clone();
+                    let matcher: crate::routing::RouteMatch =
+                        serde_json::from_value(route["match"].clone())?;
+                    ensure!(
+                        matcher.contexts.contains(&client.id)
+                            && (!matcher.last_user_contains_all.is_empty()
+                                || !matcher.headers.is_empty()),
+                        "任务路由 {before} 缺少命令上下文或任务匹配条件"
+                    );
+                    let id = format!("command-{name}-{purpose}-{}-{before}", binding.id);
+                    let mut models = BTreeSet::from([binding.model.clone()]);
+                    models.extend(binding.aliases.clone());
+                    for linked in &binding.route_ids {
+                        if let Some(linked) = routes.iter().find(|route| route["id"] == *linked)
+                            && let Some(aliases) = linked["match"]["models"].as_array()
+                        {
+                            models.extend(
+                                aliases.iter().filter_map(Value::as_str).map(str::to_owned),
+                            );
+                        }
+                    }
+                    route["id"] = json!(id);
+                    route["profile"] = json!(binding.profile);
+                    route["match"]["contexts"] = json!([client.id]);
+                    route["match"]["models"] = json!(models);
+                    route["match"]
+                        .as_object_mut()
+                        .context("缺少压缩匹配条件")?
+                        .entry("headers")
+                        .or_insert_with(|| json!([]))
+                        .as_array_mut()
+                        .context("headers 必须为数组")?
+                        .push(json!({"name":manager.command_header,"values":[name]}));
+                    ensure!(
+                        !routes.iter().any(|route| route["id"] == id),
+                        "压缩路由名称冲突：{id}"
+                    );
+                    routes.insert(index, route);
+                    let mut task_headers = case_headers.clone();
+                    for predicate in &matcher.headers {
+                        task_headers.insert(
+                            predicate.name.clone(),
+                            predicate
+                                .values
+                                .first()
+                                .or(predicate.contains.first())
+                                .cloned()
+                                .unwrap_or_default(),
+                        );
+                    }
+                    value["validation_cases"].as_array_mut().context("缺少验证用例")?.push(json!({"name":id,"context":client.id,"model":binding.model,"headers":task_headers,"last_user_content":matcher.last_user_contains_all.join("\n"),"expected":{"rule_id":id,"target":target,"model":binding.model}}));
+                    managed.push(id);
+                }
+            }
             for id in &binding.route_ids {
                 ensure!(
                     linked_routes.insert(id),

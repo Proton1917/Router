@@ -6,7 +6,61 @@
 
 左下角“设置 → 客户端接入”中的模型选择也读取同一目录。Claude App、Office 的兼容 ID 保留，绑定的目标模型可以更换。高级设置中的共享模型配置提供同样的模型选择控件。
 
+## 思考强度
+
+`runtime.selection.reasoning_sources` 按顺序声明请求中的强度字段，例如 `/output_config/effort`、`/reasoning/effort`、`/reasoning_effort`、`/effort`。每个目标的 `reasoning_models` 保存档位与实际模型 ID 的映射：
+
+```json
+{
+  "label": "Opus 5.5",
+  "models": {
+    "low": "claude-opus-5-5-low",
+    "medium": "claude-opus-5-5-medium",
+    "high": "claude-opus-5-5-high"
+  },
+  "default_effort": "high",
+  "follow_request": true,
+  "aliases": {"minimal": "low", "xhigh": "high", "max": "high"},
+  "labels": {"low": "Low · 低", "medium": "Medium · 中", "high": "High · 高"},
+  "remove": ["/thinking"]
+}
+```
+
+映射属于目标所在的 API 后端。`follow_request` 为 `false` 时使用 `default_effort`；为 `true` 时优先读取客户端参数。`aliases` 明确声明不同客户端档位的对应关系，未配置的强度返回错误。完成选择后移除已消费的强度字段及 `remove` 指定的字段，避免后端再次按其他参数改变档位。标准与 Fast 分别保存映射；上下文预算按所有可能目标的已知上限检查。
+
+在 `management.model_catalogs.<backend>.reasoning_variants` 中配置目录的档位命名规则：
+
+```json
+{
+  "suffixes": {"low": "-low", "medium": "-medium", "high": "-high"},
+  "name_suffixes": {"low": " (Low)", "medium": " (Medium)", "high": " (High)"},
+  "default_effort": "high",
+  "aliases": {"minimal": "low", "xhigh": "high", "max": "high"},
+  "labels": {"low": "Low · 低", "medium": "Medium · 中", "high": "High · 高"},
+  "remove": ["/thinking"]
+}
+```
+
+模型下拉框只合并实时目录中已经返回、且同一名称前缀下存在至少两个档位的条目。选择模型后，将当前目录中的目标写入路由配置。相同规则适用于后续新模型，规则变化时修改 JSON；Rust 不包含服务商名称、模型名称或固定档位列表。已保存的映射可以在命令、客户端接入和共享模型编辑窗口中修改。
+
 ## 后台监控
+
+命令编辑窗口提供模型搜索与自填输入框。选择后端后，输入关键字过滤实时目录；填写完整 ID 并点击“使用此 ID”可保存目录尚未列出的模型。
+
+供应商目录由 `management.model_catalogs.<backend>.providers` 配置，复用该后端的认证。OpenRouter 可配置：
+
+```json
+{
+  "providers": {
+    "path": "/v1/models/{model}/endpoints",
+    "rows_pointer": "/data/endpoints",
+    "id_pointers": ["/tag"],
+    "name_pointers": ["/provider_name"]
+  }
+}
+```
+
+选择模型时，供应商输入框查询该模型的端点列表。用户可选择返回的 tag 或直接填写 tag；应用后继续使用该目标原有的供应商锁定设置。
 
 模型选择控件中的“后台监控”与检查间隔随应用修改保存。后台 Router 运行时默认每 30 秒查询，关闭控制台后继续检查。打开模型编辑或切换后端时立即同步。首次成功结果作为比较基准，后续显示新增、移除及名称、上下文、能力字段的变化；点击“标记已查看”更新基准。后台只读取目录，模型替换由用户选择并应用。
 

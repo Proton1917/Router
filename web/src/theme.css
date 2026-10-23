@@ -1,0 +1,54 @@
+:root { color-scheme: light dark; }
+@media (prefers-color-scheme: dark) {
+  html:root { color-scheme: dark; color: #eceee9; background: #171a18; --ink: #eceee9; --muted: #acb6ad; --line: #a6b4a62b; --green: #a1cfb0; --surface: #252d27d9; --dark-field: #191f1be6; }
+  html[data-desktop] { background: transparent; }
+  html:root body { background: transparent; }
+  html:root .sidebar { background: linear-gradient(160deg,#202922b8,#161e18a6); color: var(--ink); }
+  html:root .wordmark { color: #d0e8d4; text-shadow: none; }
+  html:root .wordmark span { color: #a1cfb0; }
+  html:root .sidebar nav button { color: #bcc9bf; }
+  html:root .sidebar nav button:hover { background: #d3e9d810; border-color: #c8dfcd20; }
+  html:root .sidebar nav button.active { color: #eef8ed; background: linear-gradient(145deg,#b6d5be26,#88af9917); border-color: #cfecd433; box-shadow: inset 0 1px 0 #e7ffed12,0 5px 18px #0002; }
+  html:root .application > main { background: linear-gradient(140deg,#222923eb,#1b221ee6); border-color: #c1d7c129; box-shadow: inset 0 1px 0 #efffea0a,0 10px 44px #0003; }
+  html:root .topbar, html:root .modal > header, html:root .modal > footer { background: #242c25b3; border-color: var(--line); }
+  html:root :is(h1,h2,h3,h4,.command-name,.model-name,.settings-card dd,.backend-detail strong,.summary-strip strong,.review-list strong,.review-summary strong,.integration-card h2) { color: var(--ink); }
+  html:root :is(.workspace-tag,.sidebar-footer,.terminal-mark,.desktop-titlebar,.eyebrow,.breadcrumb,.gateway-address,.page-heading p,.cell-note,.backend-url,.backend-detail,.template-description,.field-label,.check-field,.field small,.search,.search input::placeholder,.savebar strong,.savebar span,.config-location small,.code-preview,.muted,.empty,.empty h3,.empty p,.footer-note,.advanced summary,.mods-toolbar p,.mod-card header code,.integration-card p) { color: var(--muted); }
+  html:root :is(.command-card,.command-model-item,.backend-card,.table-panel,.settings-card,.integration-card,.quota-card,.summary-strip,.mod-card,.mods-workspace > .settings-card) { background: linear-gradient(145deg,#303a32de,#27312bd4); border-color: var(--line); box-shadow: inset 0 1px 0 #efffea09,0 4px 18px #0002; color: var(--ink); }
+  html:root :is(.config-location,.callout,.secret-box,.review-list,.mods-validation,.editor-mode,.backend-icon,.integration-address,.integration-models,.integration-slot,.oauth-status,.reasoning-controls) { background: #b7d0b90d; border-color: var(--line); color: var(--muted); }
+  html:root :is(.command-model-summary em,.chips span,.subtle-badge) { color: #c2d7be; background: #a6c29b17; border-color: var(--line); }
+  html:root :is(.command-model-summary > div,.backend-detail,.integration-card footer,.review-list > div) { border-color: var(--line); }
+  html:root th { color: var(--muted); background: #202922; border-color: var(--line); }
+  html:root td { color: var(--ink); border-color: var(--line); }
+  html:root tbody tr:hover { background: #d9f0d409; }
+  html:root .button { background: linear-gradient(150deg,#3c493fd9,#29372fc4); color: #d5e8d6; border-color: #bdd0b72e; box-shadow: inset 0 1px 0 #efffea10,0 2px 7px #0002; }
+  html:root .button:hover:not(:disabled) { background: #455c49; border-color: #a1cfb05c; }
+  html:root .button.primary { background: linear-gradient(145deg,#99c5a6,#79ad8f); border-color: #b4dbba70; color: #10251a; box-shadow: inset 0 1px 0 #efffea26,0 5px 15px #0002; }
+  html:root .button.primary:hover:not(:disabled) { background: #add4b7; color: #10251a; }
+  html:root .button.danger { color: #ffc2b0; background: #693c2e70; border-color: #de987859; }
+  html:root :is(.row-actions button,.model-item-actions button,.backend-card footer > button:not(.button),.icon-button,.integration-commands button) { color: #becfbd; }
+  html:root .icon-button:hover, html:root .editor-mode button.selected { background: #b9d2b920; color: var(--ink); }
+  html:root .search { background: #16221a70; }
+  html:root .search input { color: var(--ink); background: transparent; }
+  html:root :is(.field input,.field select,.field textarea,.catalog-tools input,.catalog-settings input) { background: var(--dark-field); color: var(--ink); border-color: #b2c7ad38; }
+  html:root input::placeholder, html:root textarea::placeholder { color: #9aa89c; }
+  html:root .field input:disabled { background: #242c24; color: #a5b1a4; }
+  html:root .catalog-tools button { color: var(--ink); background: #b9d2b918; border-color: var(--line); }
+  html:root .settings-trigger, html:root .savebar { background: #28392ddd; color: var(--ink); border-color: #b7cfb33b; box-shadow: inset 0 1px 0 #e7ffed12,0 8px 26px #0004; }
+  html:root .savebar.is-dirty, html:root .config-update { background: #3e3b27ed; color: #eee3b7; }
+  html:root .modal, html:root main.settings-panel { background: linear-gradient(145deg,#29322bf5,#1c271feF); border-color: #c8dfc235; box-shadow: inset 0 1px 0 #efffea0a,0 30px 100px #0007; }
+  html:root .modal-backdrop, html:root .settings-scrim { background: #09100b75; }
+  html:root .settings-navigation { background: #17231b45; }
+  html:root .settings-navigation button.active, html:root .settings-navigation button:hover { background: #b4d7b51c; }
+  html:root .reasoning-controls summary, html:root .model-position { color: #b8c8b3; }
+  html:root :is(.inline-error,.integration-error,.spt-failure,.spt-state.failed,.spt-state.interrupted) { color: #ffb29c; }
+  html:root .spt-error { background: #442d26; border-color: #cf8b7154; color: #ffc2ad; }
+  html:root .mod-availability, html:root .chips .amber-chip { background: #4e42295c; color: #e8d19b; border-color: #b9a36a40; }
+  html:root .transcription-workspace { --spt-surface: #2d372fd6; --spt-fill: #b6d3b30c; --spt-border: #b9cfb52b; }
+  html:root .spt-file-icon { background: #b9d2b915; }
+  html:root .quota-window progress::-webkit-progress-value { background: var(--green); }
+  html:root :is(button,a,input,select,textarea):focus-visible { outline-color: #b6d9a9; }
+}
+@media (prefers-color-scheme: dark) and (prefers-reduced-transparency: reduce) {
+  html:root, html:root .sidebar { background: #1c231e; }
+  html:root .application > main, html:root .modal, html:root .savebar, html:root .settings-trigger { background: #263129; }
+}

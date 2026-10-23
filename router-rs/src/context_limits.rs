@@ -62,7 +62,7 @@ pub fn validate(path: &Path, config: &Value) -> Result<()> {
             command
                 .model_bindings
                 .iter()
-                .any(|item| item.context_window.is_some())
+                .any(|item| item.context_window.is_some() || item.max_context)
         })
     {
         return Ok(());
@@ -70,10 +70,28 @@ pub fn validate(path: &Path, config: &Value) -> Result<()> {
     let result = discover(path, config, None, false)?;
     for (name, command) in &manager.commands {
         for binding in &command.model_bindings {
-            let Some(window) = binding.context_window else {
+            if binding.context_window.is_none() && !binding.max_context {
                 continue;
-            };
+            }
             let entry = &result["commands"][name][&binding.id];
+            let window = if binding.max_context {
+                ensure!(
+                    entry["complete"].as_bool() == Some(true),
+                    "模型 {} 的目录尚未公布全部上下文上限",
+                    binding.id
+                );
+                entry["max_tokens"]
+                    .as_u64()
+                    .context("模型上下文上限未知")?
+                    .min(
+                        manager.templates[&command.template]
+                            .context_window_range
+                            .context("启动方式缺少上下文范围")?
+                            .max,
+                    )
+            } else {
+                binding.context_window.context("缺少固定上下文")?
+            };
             let destinations = entry["destinations"]
                 .as_array()
                 .context("上下文目录缺少模型结果")?;

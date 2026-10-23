@@ -98,6 +98,11 @@ pub fn prepare(
                 crate::routing::set_json_pointer(&mut metadata, &source.pointer, value)?;
             }
         }
+        for path in &config.runtime.selection.reasoning_sources {
+            if let Some(value) = body.value_at(path)? {
+                crate::routing::set_json_pointer(&mut metadata, path, value)?;
+            }
+        }
     }
     let text_rules = config
         .runtime

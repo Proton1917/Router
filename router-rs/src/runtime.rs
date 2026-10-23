@@ -272,6 +272,8 @@ pub struct SelectionPolicy {
     pub fast_value: String,
     #[serde(default)]
     pub speed_sources: Vec<SpeedSource>,
+    #[serde(default)]
+    pub reasoning_sources: Vec<String>,
     pub ignored_model_suffixes: Vec<String>,
 }
 
@@ -583,6 +585,9 @@ impl RuntimeConfig {
         }
         validate_pointer(&self.selection.model_pointer)?;
         validate_pointer(&self.selection.speed_pointer)?;
+        for path in &self.selection.reasoning_sources {
+            validate_pointer(path)?;
+        }
         for source in &self.selection.speed_sources {
             validate_pointer(&source.pointer)?;
             if source.fast_values.is_empty() || source.fast_values.iter().any(String::is_empty) {

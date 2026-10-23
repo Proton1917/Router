@@ -4,7 +4,7 @@
     "minWidth": 560, "minHeight": 600,
     "titleBarStyle": "Overlay", "hiddenTitle": true,
     "trafficLightPosition": {"x": 20, "y": 24},
-    "transparent": true, "backgroundColor": "#00000000", "theme": "Light",
+    "transparent": true, "backgroundColor": "#00000000", "theme": null,
     "windowEffects": {"effects": ["liquidGlassRegular", "sidebar"], "radius": 22, "interactive": true}
   },
   "console": {
@@ -12,7 +12,7 @@
     "minWidth": 960, "minHeight": 680,
     "titleBarStyle": "Overlay", "hiddenTitle": true,
     "trafficLightPosition": {"x": 20, "y": 24},
-    "transparent": true, "backgroundColor": "#00000000", "theme": "Light",
+    "transparent": true, "backgroundColor": "#00000000", "theme": null,
     "windowEffects": {"effects": ["liquidGlassRegular", "sidebar"], "radius": 22, "interactive": true}
   }
 }

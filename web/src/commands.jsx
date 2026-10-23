@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import './commands.css';
 import { customizeCommandProfile, profileUsages } from './model-ownership.js';
-import { CatalogSelect, catalogDestination } from './catalogs.jsx';
+import { CatalogSelect, ProviderSelect, ReasoningControls, catalogDestination } from './catalogs.jsx';
 
 export function modelLabel(config, item, profiles = config.profiles, speed = 'standard') {
   const profile = profiles[item.profile];
   const target = speed === 'fast' ? profile?.fast || profile?.standard : profile?.standard;
   const model = target?.model || item.model;
-  return item.label || config.management.labels?.[`model:${model}`] || model;
+  return item.label || target?.reasoning_models?.label || config.management.labels?.[`model:${model}`] || model;
 }
 
 export function CommandList({ config, rows, edit, preview, remove, toggle, dirty, ui, workspace }) {
@@ -82,8 +82,23 @@ export function CommandEditor({ editor, config, close, save, ui, api, workspace 
     const maximum = contextMaximum(item);
     const entry = contextLimits[item.id];
     const detail = loadingLimits ? '正在读取后端模型与供应商上限。' : limitsError ? limitsError : entry?.destinations.map(row => `${row.speed === 'fast' ? 'Fast' : '标准'}：${row.max_tokens == null ? row.error || row.message || '上限未知' : `${row.max_tokens.toLocaleString()} tokens`}${row.provider ? ` · ${row.provider}` : ''}${row.resolved_models ? ` · ${row.resolved_models.join('、')}` : ''}`).join('；');
-    if (maximum < template.context_window_range.min) return `${detail} 后端上限低于此启动方式的最小可填写预算，请留空，启动时自动使用已识别上限。`;
-    return `${detail || ''} ${entry?.complete ? '已按全部目标限制预算。' : discoveryEnabled && !loadingLimits ? '未公布数值的目标，其最大窗口仍未知。' : ''} 可填写 ${template.context_window_range.min.toLocaleString()}～${maximum.toLocaleString()} tokens。留空沿用启动器基线，并受已识别上限限制；修改后重新启动命令。`;
+    if (maximum < template.context_window_range.min) return `${detail} 后端上限低于此启动方式的最小预算，选择“沿用当前启动设置”时自动使用已识别上限。`;
+    return `${detail || ''} ${entry?.complete ? '已按全部目标限制预算。' : discoveryEnabled && !loadingLimits ? '未公布数值的目标，其最大窗口仍未知。' : ''} 预算档位受已识别上限限制；修改后重新启动命令。`;
+  }
+  function contextEditor(item,index) {
+    const maximum = contextMaximum(item);
+    const entry = contextLimits[item.id];
+    const mode = item.max_context ? 'maximum' : item.context_window != null ? 'custom' : 'inherit';
+    const choices = [...new Set([...(template.context_window_choices || []),maximum,...(item.context_window == null ? [] : [item.context_window])])].filter(value=>Number.isSafeInteger(value) && value>=template.context_window_range.min && value<=maximum).sort((a,b)=>a-b);
+    const selected = Math.max(0,choices.indexOf(item.context_window));
+    return <section className="context-budget">
+      <Field label={`模型 ${index+1} 的上下文`}><select value={mode} onChange={event=>{
+        const mode=event.target.value;
+        update(index,{max_context:mode==='maximum',context_window:mode==='custom' ? item.context_window || choices.find(value=>value>=maximum/2) || choices.at(-1) : null});
+      }}><option value="inherit">沿用当前启动设置</option><option value="maximum" disabled={!entry?.complete || loadingLimits}>最大可用{entry?.complete ? ` · ${maximum.toLocaleString()} tokens` : ' · 等待模型上限'}</option><option value="custom" disabled={!choices.length}>自选上下文档位</option></select></Field>
+      {mode==='custom' && <><div className="context-budget-value"><span>上下文预算</span><output>{item.context_window.toLocaleString()} tokens</output></div><input type="range" aria-label={`模型 ${index+1} 的上下文档位`} aria-valuetext={`${item.context_window} tokens`} min="0" max={Math.max(0,choices.length-1)} step="1" value={selected} onChange={event=>update(index,{context_window:choices[Number(event.target.value)]})}/><div className="context-budget-ticks">{choices.map(value=><button type="button" key={value} className={value===item.context_window?'selected':''} onClick={()=>update(index,{context_window:value})}>{value.toLocaleString()}</button>)}</div></>}
+      <p className="muted">{contextHint(item)}</p>
+    </section>;
   }
   const set = (key, next) => setValue(old => ({...old,[key]:next}));
   const label = item => item.label || profileLabels[item.profile] || modelLabel(config,item,allProfiles);
@@ -107,6 +122,12 @@ export function CommandEditor({ editor, config, close, save, ui, api, workspace 
   }
   function customize(index, modify) {
     const item = bindings[index];
+    if (scopes[item.id] === 'shared') {
+      const profile = structuredClone(allProfiles[item.profile]);
+      modify(profile);
+      setProfiles(old=>({...old,[item.profile]:profile}));
+      return;
+    }
     const editingConfig = {...config,profiles:allProfiles,management:{...config.management,commands:{...config.management.commands,[editingKey]:value}}};
     const {id,profile} = customizeCommandProfile(editingConfig,editingKey,item.id,modify);
     setProfiles(old => ({...old,[id]:profile}));
@@ -114,12 +135,12 @@ export function CommandEditor({ editor, config, close, save, ui, api, workspace 
   }
   function selectRemote(index, row, backend) {
     const item = bindings[index];
-    if (allProfiles[item.profile]?.standard.model === row.id && allProfiles[item.profile]?.standard.target === backend) return;
+    if (allProfiles[item.profile]?.standard.model === row.id && allProfiles[item.profile]?.standard.target === backend && (!row.reasoning_models || allProfiles[item.profile]?.standard.reasoning_models)) return;
     const shared = scopes[item.id] === 'shared';
     const existing = eligible.find(([,profile]) => profile.standard.target === backend && profile.standard.model === row.id);
-    if (existing && !shared) { selectProfile(index,existing[0]); return; }
+    if (existing && !shared && (!row.reasoning_models || existing[1].standard.reasoning_models)) { selectProfile(index,existing[0]); return; }
     const id = shared ? item.profile : `command-model-${crypto.randomUUID().replaceAll('-','')}`;
-    const profile = {standard:catalogDestination(config,backend,row.id)};
+    const profile = {standard:catalogDestination(config,backend,row)};
     setProfiles(old=>({...old,[id]:profile}));
     setProfileLabels(old=>({...old,[id]:row.name}));
     const aliases = [...new Set([...(item.aliases || []),item.model])].filter(alias=>alias && alias !== row.id);
@@ -130,8 +151,8 @@ export function CommandEditor({ editor, config, close, save, ui, api, workspace 
     const target = allProfiles[item.profile][which];
     return <div className="form-grid command-destination">
       {which === 'fast' && <><Field label="Fast API 后端"><select value={target.target} onChange={event => customize(index,next => { next[which] = {target:event.target.value,model:''}; })}>{backends.map(id => <option key={id} value={id}>{config.management.labels?.[`backend:${id}`] || id}</option>)}</select></Field>
-      <CatalogSelect backend={target.target} value={target.model} label="Fast 模型" onSelect={row=>customize(index,next=>{ next[which] = {...catalogDestination(config,target.target,row.id),...(target.provider ? {provider:target.provider} : {})}; })}/></>}
-      <Field label={`${which === 'fast' ? 'Fast' : '标准'}供应商`}><input value={target.provider || ''} placeholder="使用后端默认选择" onChange={event => customize(index,next => { if (event.target.value) next[which].provider = event.target.value; else delete next[which].provider; })}/></Field>
+      <CatalogSelect backend={target.target} value={target.model} label="Fast 模型" onSelect={row=>customize(index,next=>{ next[which] = {...catalogDestination(config,target.target,row),...(target.provider ? {provider:target.provider} : {})}; })}/><ReasoningControls destination={target} label={`模型 ${index+1} Fast`} onChange={value=>customize(index,next=>{next.fast=value;})}/></>}
+      {(which==='fast' || !config.management.model_catalogs?.[target.target]?.providers) && <ProviderSelect backend={target.target} model={target.model} value={target.provider} label={`${which === 'fast' ? 'Fast' : '标准'}供应商`} onChange={value=>customize(index,next=>{if(value)next[which].provider=value;else delete next[which].provider;})}/>}
       <Field label={`${which === 'fast' ? 'Fast' : '标准'}服务等级`}><select value={target.field_policy?.set?.['/service_tier'] || ''} onChange={event => customize(index,next => { next[which].field_policy ||= {}; next[which].field_policy.set ||= {}; if (event.target.value) next[which].field_policy.set['/service_tier'] = event.target.value; else delete next[which].field_policy.set['/service_tier']; })}><option value="">跟随请求</option><option value="default">标准</option><option value="priority">优先</option><option value="flex">弹性</option>{target.field_policy?.set?.['/service_tier'] && !['default','priority','flex'].includes(target.field_policy.set['/service_tier']) && <option>{target.field_policy.set['/service_tier']}</option>}</select></Field>
     </div>;
   }
@@ -147,11 +168,12 @@ export function CommandEditor({ editor, config, close, save, ui, api, workspace 
         if (!item.model.trim() || !allProfiles[item.profile]) throw new Error('请完整设置每个模型条目。');
         if (item.context_window != null && (!template.context_window_range || !Number.isSafeInteger(item.context_window) || item.context_window < template.context_window_range.min || item.context_window > template.context_window_range.max)) throw new Error('请在启动方式允许的范围内填写上下文预算。');
         const previous = editor.value.model_bindings?.find(row=>row.id===item.id);
-        const budgetUnchanged = previous?.context_window === item.context_window && JSON.stringify(config.profiles[previous?.profile]) === JSON.stringify(allProfiles[item.profile]);
-        if (item.context_window != null && discoveryEnabled && !budgetUnchanged) {
+        const budgetUnchanged = previous?.context_window === item.context_window && !!previous?.max_context === !!item.max_context && JSON.stringify(config.profiles[previous?.profile]) === JSON.stringify(allProfiles[item.profile]);
+        if ((item.context_window != null || item.max_context) && discoveryEnabled && !budgetUnchanged) {
           if (loadingLimits || !contextLimits[item.id]) throw new Error(limitsError || '请等待模型上下文上限读取完成。');
           const failed = contextLimits[item.id].destinations.find(row => row.error);
           if (failed) throw new Error(failed.error);
+          if (item.max_context && !contextLimits[item.id].complete) throw new Error('目录尚未公布全部目标的上下文上限，请选择固定档位。');
           if (item.context_window > contextMaximum(item)) throw new Error(`${label(item)} 的上下文预算不能超过 ${contextMaximum(item).toLocaleString()} tokens。`);
         }
         for (const id of [item.model,...(item.aliases || [])]) { if (ids.has(id.toLowerCase())) throw new Error(`模型标识重复：${id}`); ids.add(id.toLowerCase()); }
@@ -181,11 +203,15 @@ export function CommandEditor({ editor, config, close, save, ui, api, workspace 
           <Field label={`模型 ${index+1} 的替换范围`}><select value={scopes[item.id] || 'local'} onChange={e=>setScopes(old=>({...old,[item.id]:e.target.value}))}><option value="local">仅此命令入口</option><option value="shared">共享配置的全部关联入口</option></select></Field>
           {scopes[item.id] === 'shared' && <p className="catalog-impact">将修改：{profileUsages(config,item.profile).map(usage=>usage.command || usage.integration || usage.route).filter((v,i,a)=>a.indexOf(v)===i).join('、') || name}。</p>}</div>
           <CatalogSelect backend={target?.target} value={target?.model} label={`模型 ${index+1} 的模型`} onSelect={row=>selectRemote(index,row,target.target)} savedProfiles={eligible.filter(([,p])=>p.standard.target===target?.target).map(([id,p])=>({id,label:config.management.labels?.[`profile:${id}`] || p.standard.model}))} onProfile={id=>selectProfile(index,id)}/>
+          {config.management.model_catalogs?.[target?.target]?.providers && <ProviderSelect backend={target.target} model={target.model} value={target.provider} label={`模型 ${index+1} 的供应商`} onChange={value=>customize(index,next=>{if(value)next.standard.provider=value;else delete next.standard.provider;})}/>}
           <Field label={`模型 ${index+1} 的显示名称`} hint="留空时自动跟随当前 API 模型。"><input value={item.label || ''} placeholder={modelLabel(config,{...item,label:''},allProfiles)} onChange={event => update(index,{label:event.target.value})}/></Field>
           <Field label={`模型 ${index+1} 的菜单说明`}><input value={item.description || ''} placeholder="自动显示模型与服务来源" onChange={event => update(index,{description:event.target.value})}/></Field>
         </div>
+        <ReasoningControls destination={target} label={`模型 ${index+1}`} onChange={value=>customize(index,next=>{next.standard=value;})}/>
+        {!!template.compaction_routes?.length && <Field label={`模型 ${index+1} 的上下文压缩`} hint={item.compact_with_self ? '使用当前模型自身的路由与供应商。' : '沿用系统的压缩路由配置。'}><select value={item.compact_with_self ? 'self' : 'system'} onChange={event=>update(index,{compact_with_self:event.target.value==='self'})}><option value="system">系统压缩模型</option><option value="self">当前模型自身</option></select></Field>}
+        {!!template.subagent_routes?.length && <Field label={`模型 ${index+1} 的 Subagent`} hint={item.subagents_with_self ? '子任务使用当前主模型的路由。' : '子任务使用系统默认路由。'}><select value={item.subagents_with_self ? 'self' : 'system'} onChange={event=>update(index,{subagents_with_self:event.target.value==='self'})}><option value="system">系统默认</option><option value="self">当前模型自身</option></select></Field>}
         <div className="command-model-options"><label className="check-field"><input type="checkbox" checked={item.visible} onChange={event => update(index,{visible:event.target.checked})}/>在客户端菜单显示</label><span>Fast：{profile?.fast ? [profile.fast.model || item.model,config.management.labels?.[`backend:${profile.fast.target}`] || profile.fast.target,profile.fast.provider].filter(Boolean).join(' · ') : '沿用标准目标'}</span></div>
-        {template.context_window_range && <Field label={`模型 ${index+1} 的上下文预算（tokens）`} hint={contextHint(item)}><input type="number" min={template.context_window_range.min} max={contextMaximum(item)} step="1" value={item.context_window ?? ''} placeholder="沿用启动器基线" onChange={event => update(index,{context_window:event.target.value === '' ? null : Number(event.target.value)})}/></Field>}
+        {template.context_window_range && contextEditor(item,index)}
         <details className="advanced"><summary>自定义标准与 Fast 目标</summary><p className="muted">独享配置直接更新；共享配置会生成此入口使用的独立副本。</p>{destination(index,'standard')}<label className="check-field"><input type="checkbox" checked={!!profile?.fast} onChange={event => customize(index,next => { if (event.target.checked) next.fast = structuredClone(next.standard); else delete next.fast; })}/>单独配置 Fast 目标</label>{profile?.fast && destination(index,'fast')}</details>
         <details className="advanced"><summary>客户端标识与兼容路由</summary><Field label={`模型 ${index+1} 的客户端标识`}><input value={item.model} onChange={event => update(index,{model:event.target.value})}/></Field><Field label={`模型 ${index+1} 的兼容名称`} hint="每行一个，保留已有会话所用的名称。"><textarea rows={2} value={(item.aliases || []).join('\n')} onChange={event => update(index,{aliases:event.target.value.split('\n').filter(Boolean)})}/></Field>{item.route_ids?.length > 0 && <p className="muted">同时更新 {item.route_ids.length} 条已关联的兼容路由。</p>}</details>
       </article>; })}

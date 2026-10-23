@@ -66,6 +66,8 @@ export function plannedProfileRouteCount(config, profile) {
   for (const [, spec] of commands(config)) {
     if (spec.profile === profile) count++;
     count += (spec.model_bindings || []).filter(binding => binding.profile === profile).length;
+    count += (spec.model_bindings || []).filter(binding => binding.compact_with_self && binding.profile === profile).length * (config.management.templates[spec.template]?.compaction_routes?.length || 0);
+    count += (spec.model_bindings || []).filter(binding => binding.subagents_with_self && binding.profile === profile).length * (config.management.templates[spec.template]?.subagent_routes?.length || 0);
   }
   for (const [, spec] of integrations(config)) count += (spec.slots || []).filter(slot => slot.profile === profile).length;
   return count;

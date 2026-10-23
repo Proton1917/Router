@@ -41,6 +41,13 @@ def prepare(request):
     options = []
     environment = dict(settings.get("env", {}))
     template = config["management"]["templates"][entry["template"]]
+    if template.get('subagent_routes'):
+        environment.update({
+            'CLAUDE_CODE_SUBAGENT_MODEL':'inherit',
+            'CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL':'inherit',
+            'CLAUDE_CODE_SUBAGENT_MODEL_FORCE':'1',
+            'CLAUDE_CODE_GATEWAY_HINT_HEADERS':'1',
+        })
     speed_option = template.get("options", {}).get("router-speed")
     router_speed = None
     if speed_option:
@@ -69,7 +76,6 @@ def prepare(request):
         if not native_fast:
             settings["fastMode"] = False
         settings["fastModePerSessionOptIn"] = True
-    context_bindings = [item for item in bindings if item.get("context_window") is not None]
     discovered = {}
     limits = config['management']['templates'][entry['template']].get('context_window_range')
     if limits and config['management'].get('context_discovery'):
@@ -82,6 +88,10 @@ def prepare(request):
         discovered = discovery.discover({**request, 'headers':headers})['commands'][request['command_name']]
         for item in bindings:
             discovery.validate_budget(request['command_name'], item, discovered[item['id']])
+    if any(item.get('max_context') for item in bindings) and not discovered:
+        raise ValueError('最大上下文需要可用的模型上限目录')
+    bindings = [{**item,"context_window":min(discovered[item['id']]['max_tokens'],limits['max'])} if item.get('max_context') else item for item in bindings]
+    context_bindings = [item for item in bindings if item.get("context_window") is not None]
     if context_bindings or any(item['max_tokens'] is not None for item in discovered.values()):
         limits = config["management"]["templates"][entry["template"]]["context_window_range"]
         for item in context_bindings:
@@ -114,12 +124,15 @@ def prepare(request):
         destination = profile.get("fast", profile["standard"]) if router_speed == "fast" else profile["standard"]
         model = destination.get("model") or item["model"]
         backend = destination["target"]
-        label = item.get("label") or labels.get("model:" + model) or model
+        reasoning = destination.get("reasoning_models")
+        label = item.get("label") or (reasoning or {}).get("label") or labels.get("model:" + model) or model
         if router_speed == "fast" and profile.get("fast"):
             label += " · Router Fast"
         description = item.get("description") or label + " · " + labels.get("backend:" + backend, backend)
         for spelling in [item["model"], *item.get("aliases", [])]:
             model_labels[spelling] = label
+            if reasoning:
+                capabilities.append(re.sub(r"\[1m\]", "", spelling, flags=re.I) + "=effort")
         if router_speed == "client" or not speed_option and profile.get("fast"):
             for spelling in [item["model"], *item.get("aliases", [])]:
                 capabilities.append(re.sub(r"\[1m\]", "", spelling, flags=re.I) + "=fast_mode")

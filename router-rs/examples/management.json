@@ -31,6 +31,9 @@
       "program": "claude",
       "model_adapter": {"program":"python3", "args":["{{ config_directory }}/application/scripts/claude-model-catalog.py"]},
       "context_window_range": {"min":100000,"max":1000000},
+      "context_window_choices": [131072,262144,524288,786432,1000000],
+      "compaction_routes": ["messages-compaction"],
+      "subagent_routes": ["messages-subagent"],
       "options": {
         "router-speed": {
           "label": "Fast 控制方式（重新启动命令后生效）",

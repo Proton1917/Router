@@ -592,6 +592,7 @@ fn transparent_route(
             || destination.model_template.is_some()
             || destination.provider.is_some()
             || destination.reasoning_adapter.is_some()
+            || destination.reasoning_models.is_some()
             || destination.force_nonstream
             || destination.response_cache_ttl_seconds.is_some()
             || destination.payload_normalization != runtime::PayloadNormalization::default()

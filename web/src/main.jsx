@@ -9,10 +9,11 @@ import { TranscriptionWorkspace } from './transcription.jsx';
 import { CommandEditor, CommandList } from './commands.jsx';
 import { OAuthFields } from './oauth.jsx';
 import { QuotaOverview } from './quotas.jsx';
-import { CatalogProvider, CatalogSelect, catalogDestination } from './catalogs.jsx';
+import { CatalogProvider, CatalogSelect, ProviderSelect, ReasoningControls, catalogDestination } from './catalogs.jsx';
 import { plannedProfileRouteCount, pruneDetachedCommandProfiles } from './model-ownership.js';
 import './mods.css';
 import './workspace.css';
+import './theme.css';
 
 const copy = value => structuredClone(value);
 const pretty = value => JSON.stringify(value, null, 2);
@@ -350,8 +351,9 @@ function Editor({ editor, config, appliedConfig, close, save, notify }) {
     const tier = destination.field_policy?.set?.['/service_tier'] || '';
     return <section className="form-section"><h3>{label}</h3><div className="form-grid">
       <Field label="API 后端"><select value={destination.target || ''} onChange={e => set(`${which}.target`, e.target.value)}>{option(config.runtime.backends)}</select></Field>
-      <CatalogSelect backend={destination.target} value={destination.model} label={`${label}模型`} onSelect={row=>set(which,catalogDestination(config,destination.target,row.id))}/>
-      <Field label="供应商锁定" hint="留空时使用后端的默认选择。"><input value={destination.provider || ''} onChange={e => set(`${which}.provider`, e.target.value || undefined)} placeholder="可选"/></Field>
+      <CatalogSelect backend={destination.target} value={destination.model} label={`${label}模型`} onSelect={row=>set(which,catalogDestination(config,destination.target,row))}/>
+      <ReasoningControls destination={destination} label={label} onChange={next=>set(which,next)}/>
+      <ProviderSelect backend={destination.target} model={destination.model} value={destination.provider} label="供应商锁定" onChange={provider=>set(`${which}.provider`,provider || undefined)}/>
       <Field label="服务等级" hint="Fast 使用上游快速服务等级，按该等级计费。"><select value={tier} onChange={e => set(`${which}.field_policy.set./service_tier`, e.target.value || undefined)}><option value="">跟随客户端选择</option><option value="default">标准</option><option value="priority">Fast · 快速</option><option value="flex">Flex · 弹性</option>{tier && !['default','priority','flex'].includes(tier) && <option value={tier}>{tier}</option>}</select></Field>
       <Field label="推理字段策略"><select value={destination.reasoning_adapter || ''} onChange={e => set(`${which}.reasoning_adapter`, e.target.value || undefined)}><option value="">保持原请求</option>{option(config.runtime.reasoning_policies)}</select></Field>
     </div></section>;

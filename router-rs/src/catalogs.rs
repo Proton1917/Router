@@ -38,6 +38,31 @@ pub struct Source {
     pub headers: BTreeMap<String, String>,
     pub auth_headers: BTreeMap<String, String>,
     pub destination: Value,
+    pub reasoning_variants: Option<ReasoningVariants>,
+    pub providers: Option<ProviderSource>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderSource {
+    pub path: String,
+    pub rows_pointer: String,
+    pub id_pointers: Vec<String>,
+    pub name_pointers: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReasoningVariants {
+    pub suffixes: BTreeMap<String, String>,
+    pub name_suffixes: BTreeMap<String, String>,
+    pub default_effort: String,
+    #[serde(default)]
+    pub aliases: BTreeMap<String, String>,
+    #[serde(default)]
+    pub labels: BTreeMap<String, String>,
+    #[serde(default)]
+    pub remove: Vec<String>,
 }
 
 impl Default for Source {
@@ -68,6 +93,8 @@ impl Default for Source {
             headers: BTreeMap::new(),
             auth_headers: BTreeMap::new(),
             destination: Value::Null,
+            reasoning_variants: None,
+            providers: None,
         }
     }
 }
@@ -486,5 +513,60 @@ async fn read(
 }
 
 pub(crate) fn routes() -> Router<ControlState> {
-    Router::new().route("/catalogs/read", post(read))
+    Router::new()
+        .route("/catalogs/read", post(read))
+        .route("/catalogs/providers", post(providers))
+}
+
+#[derive(Deserialize)]
+struct ProvidersRequest {
+    backend: String,
+    model: String,
+}
+
+async fn providers(
+    State(state): State<ControlState>,
+    Json(request): Json<ProvidersRequest>,
+) -> Result<Json<Value>, ApiError> {
+    Ok(Json(provider_models(&state, request).await?))
+}
+
+async fn provider_models(state: &ControlState, request: ProvidersRequest) -> Result<Value> {
+    ensure!(!request.model.trim().is_empty(), "请先选择模型");
+    let value = control::load_value(&state.path)?;
+    let config = crate::load_router_runtime_config(&state.path)?;
+    let mut backend = config
+        .runtime
+        .backends
+        .get(&request.backend)
+        .context("后端不存在")?
+        .clone();
+    let manager = control::management(&value)?;
+    let source = manager
+        .model_catalogs
+        .get(&request.backend)
+        .context("未配置供应商目录")?;
+    let providers = source.providers.as_ref().context("未配置供应商目录")?;
+    ensure!(
+        providers.path.starts_with('/') && providers.path.matches("{model}").count() == 1,
+        "供应商目录路径需要一个模型占位符"
+    );
+    let mut url = reqwest::Url::parse(&backend.base_url)?;
+    url.set_path(&format!(
+        "{}{}",
+        url.path().trim_end_matches('/'),
+        providers.path.replace("{model}", &request.model)
+    ));
+    backend.base_url = url.origin().ascii_serialization();
+    let catalog = Source {
+        path: url.path().to_owned(),
+        rows_pointer: providers.rows_pointer.clone(),
+        id_pointers: providers.id_pointers.clone(),
+        name_pointers: providers.name_pointers.clone(),
+        headers: source.headers.clone(),
+        auth_headers: source.auth_headers.clone(),
+        timeout_seconds: source.timeout_seconds,
+        ..Source::default()
+    };
+    Ok(json!({"providers":fetch(&backend,&catalog).await?}))
 }

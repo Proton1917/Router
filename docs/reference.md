@@ -154,9 +154,11 @@ Claude Code 的后台小模型、子任务及工作流子任务由启动方式�
 
 启动命令卡片列出全部已绑定的模型及服务来源。在“编辑命令与模型”中可以添加、删除、排序或隐藏条目，为每项选择 API 后端、模型配置和显示名称，并从可见列表中选择默认启动模型。“自定义标准与 Fast 目标”直接更新此条目独享的模型配置；配置被其他条目、客户端或手工路由使用时，为当前条目创建独立副本。更换或删除绑定后，页面清理该命令已脱离全部引用的模型配置。“模型配置”列表按应用后的命令、客户端和手工路由显示关联数量。显示名称留空时，按目标 API 模型读取 `management.labels["model:<模型 ID>"]`，未设置名称时显示 API 模型 ID。
 
-多模型列表保存在命令的 `model_bindings` 数组，每项包含 `id`、`model`、`profile`、可选的 `label`、`description`、`visible`、`aliases`、`route_ids` 和 `context_window`。`aliases` 用于启动器将已有名称规范化为当前客户端模型标识；`route_ids` 将指定的现有兼容路由关联到该模型配置，要求这些路由仅属于同一客户端上下文。Router 为各条目生成同时匹配客户端、命令请求头和模型标识的独立路由。压缩和子任务等特殊规则应位于启动方式的 `route_before` 之前。单模型 `profile` 与 `model_bindings` 不能同时设置。
+多模型列表保存在命令的 `model_bindings` 数组，每项包含 `id`、`model`、`profile`、可选的 `label`、`description`、`visible`、`aliases`、`route_ids`、`context_window`、`max_context`、`compact_with_self` 和 `subagents_with_self`。`aliases` 用于启动器将已有名称规范化为当前客户端模型标识；`route_ids` 将指定的现有兼容路由关联到该模型配置，要求这些路由仅属于同一客户端上下文。Router 为各条目生成同时匹配客户端、命令请求头和模型标识的独立路由。压缩和子任务等特殊规则应位于启动方式的 `route_before` 之前。单模型 `profile` 与 `model_bindings` 不能同时设置。
 
-Claude Code 启动方式声明 `context_window_range: {"min":100000,"max":1000000}` 后，每个模型条目会显示“上下文预算（tokens）”。`context_window` 填写整数，允许的最大值取启动方式上限和已识别后端上限中的较小值。上下文预算通过 Claude Code 2.1.296 的 `modelSettings.<model>.autoCompactWindow` 生效，控制模型使用的自动压缩窗口。切换模型时，客户端使用对应条目的预算；修改配置后重新启动命令。该预算包含客户端预留的输出和压缩空间，实际触发压缩的输入 tokens 会低于窗口数值。
+Claude Code 启动方式声明 `context_window_range: {"min":100000,"max":1000000}` 后，每个模型条目会显示上下文选择。`context_window_choices` 声明滑块档位，例如 `[131072,262144,524288,786432,1000000]`；界面过滤超出已知上限的档位。`context_window` 保存所选整数；`max_context: true` 使用全部目标的已知上限与启动方式上限的较小值，与固定 `context_window` 互斥。上下文预算通过 Claude Code 2.1.296 的 `modelSettings.<model>.autoCompactWindow` 生效，控制模型使用的自动压缩窗口。切换模型时，客户端使用对应条目的预算；修改配置后重新启动命令。该预算包含客户端预留的输出和压缩空间，实际触发压缩的输入 tokens 会低于窗口数值。
+
+启动方式的 `compaction_routes` 与 `subagent_routes` 分别列出系统压缩和子任务规则 ID。条目设置 `compact_with_self: true` 或 `subagents_with_self: true` 后，Router 在对应系统规则前生成匹配命令和主模型的专属规则，使用该条目的 profile；缺省为 `false`，沿用系统规则。系统规则须声明客户端上下文及任务请求头或压缩提示匹配条件。示例使用原生 `x-claude-code-request-class` 分类；Claude Code 适配脚本启用 `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`，并通过 `inherit` 和 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` 保留子任务所属的主模型。原生分类与继承在 Claude Code 2.1.304 验证。系统压缩模型或子任务模型的后端、模型和供应商由对应系统规则的 profile 配置。
 
 `management.context_discovery` 配置目录适配程序、缓存目录、缓存有效期及各后端的目录字段。打开命令编辑窗口或切换目标时，界面自动查询真实 API 模型和供应商的上限，标准与 Fast 共用一个预算时取两者较小值；“刷新模型上限”重新请求目录。管理接口预览、保存和客户端启动均校验该上限，留空的启动器基线也会受已识别上限限制。目录结果只缓存模型和上限等元数据，凭据继续读取独立来源。网络错误明确显示；没有公布数值的目标显示上限未知，其物理最大窗口需要后端提供。目录查询发生在配置操作和客户端启动时，转发请求不执行目录查询。
 

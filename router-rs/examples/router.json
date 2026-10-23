@@ -62,6 +62,7 @@
       "model_pointer": "/model",
       "speed_pointer": "/speed",
       "fast_value": "fast",
+      "reasoning_sources": ["/output_config/effort", "/reasoning/effort", "/reasoning_effort", "/effort"],
       "speed_sources": [{"pointer": "/service_tier", "fast_values": ["priority", "fast", "ultrafast"], "contexts": ["responses-client"]}],
       "ignored_model_suffixes": []
     },
@@ -83,9 +84,13 @@
   },
   "routes": [
     {"id": "responses", "match": {"contexts": ["responses-client"]}, "profile": "responses"},
+    {"id": "messages-compaction", "match": {"contexts": ["messages-client"], "headers": [{"name":"x-claude-code-request-class", "values":["compaction"]}]}, "profile": "messages"},
+    {"id": "messages-subagent", "match": {"contexts": ["messages-client"], "headers": [{"name":"x-claude-code-request-class", "values":["subagent","workflow"]}]}, "profile": "messages"},
     {"id": "messages", "match": {}, "profile": "messages"}
   ],
   "validation_cases": [
+    {"name":"messages-compaction", "context":"messages-client", "model":"selected-model", "headers":{"x-claude-code-request-class":"compaction"}, "expected":{"rule_id":"messages-compaction", "target":"messages", "model":"selected-model"}},
+    {"name":"messages-subagent", "context":"messages-client", "model":"selected-model", "headers":{"x-claude-code-request-class":"subagent"}, "expected":{"rule_id":"messages-subagent", "target":"messages", "model":"selected-model"}},
     {"name": "responses-model-passthrough", "context": "responses-client", "model": "selected-model", "expected": {"rule_id": "responses", "target": "responses", "model": "selected-model"}},
     {"name": "messages-model-passthrough", "context": "messages-client", "model": "selected-model", "expected": {"rule_id": "messages", "target": "messages", "model": "selected-model"}}
   ]

@@ -74,6 +74,12 @@ pub struct LaunchTemplate {
     pub model_adapter: Option<ProcessSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window_range: Option<crate::routing::TokenRange>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub compaction_routes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subagent_routes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub context_window_choices: Vec<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]

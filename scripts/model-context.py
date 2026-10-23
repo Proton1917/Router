@@ -36,6 +36,7 @@ class Discovery:
         self.refresh = refresh
         self.client_headers = {name.lower():value for name,value in (client_headers or {}).items()}
         self.responses = {}
+        self.catalogs = {}
         self.headers = {}
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
         self.cache = Path(self.settings['cache_directory'])
@@ -49,6 +50,15 @@ class Discovery:
         source = self.settings.get('sources', {}).get(target, {})
         backend = self.config['runtime']['backends'][target]
         return source.get('base_url', backend['base_url']).rstrip('/') + path
+
+    def catalog_window(self, target, model):
+        if target not in self.catalogs:
+            path = self.directory / 'model-catalogs' / (target + '.json')
+            self.catalogs[target] = json.loads(path.read_text()) if path.is_file() else {}
+        snapshot = self.catalogs[target]
+        if snapshot.get('base_url') == self.config['runtime']['backends'][target]['base_url'] and time.time() - (snapshot.get('updated_at') or 0) <= self.settings['ttl_seconds']:
+            return next((row.get('context_window') for row in snapshot.get('models', []) if row.get('id') == model), None)
+        return None
 
     def get(self, target, path):
         backend = self.config['runtime']['backends'][target]
@@ -93,9 +103,10 @@ class Discovery:
         identity = {'base_url': self.catalog_url(target, ''), 'target': target, 'model': model, 'provider': provider, 'source': source}
         key = hashlib.blake2b(json.dumps(identity, sort_keys=True).encode(), digest_size=16).hexdigest()
         cache = self.cache / (key + '.json')
+        catalog_window = self.catalog_window(target, model)
         if cache.exists() and not self.refresh:
             saved = json.loads(cache.read_text())
-            if 0 <= time.time() - saved['checked_at'] <= self.settings['ttl_seconds']:
+            if 0 <= time.time() - saved['checked_at'] <= self.settings['ttl_seconds'] and (saved['result']['max_tokens'] is not None or catalog_window is None):
                 return saved['result']
         preset = source.get('presets')
         if preset and model.startswith(preset['prefix']):
@@ -130,6 +141,8 @@ class Discovery:
         if len(matches) > 1:
             raise ValueError('模型目录的配置模型标识重复：' + model)
         window = at(matches[0], source['context'])
+        if window is None:
+            window = catalog_window
         if window is not None and not positive(window):
             raise ValueError('模型目录的上下文上限必须为正整数：' + model)
         limits = [window] if positive(window) else []
@@ -187,7 +200,14 @@ class Discovery:
                     continue
                 try:
                     destination = {**profile[speed], 'provider':provider} if provider else profile[speed]
-                    row = self.destination(destination)
+                    reasoning = destination.get('reasoning_models')
+                    if reasoning:
+                        models = list(dict.fromkeys(reasoning['models'].values())) if reasoning['follow_request'] else [reasoning['models'][reasoning['default_effort']]]
+                        variants = [self.destination({**destination, 'model':model}) for model in models]
+                        limits = [variant['max_tokens'] for variant in variants if variant['max_tokens'] is not None]
+                        row = {**variants[0], 'max_tokens':min(limits) if len(limits) == len(variants) else None, 'resolved_models':models}
+                    else:
+                        row = self.destination(destination)
                 except (OSError, ValueError, KeyError, subprocess.SubprocessError, urllib.error.URLError) as error:
                     reason = str(error.reason) if isinstance(error, urllib.error.URLError) else str(error) if isinstance(error, ValueError) else type(error).__name__
                     row = {'target': profile[speed]['target'], 'model': profile[speed].get('model'), 'max_tokens': None, 'error': '上下文目录获取失败：' + reason}
@@ -199,11 +219,13 @@ class Discovery:
 
 def discover(request):
     discovery = Discovery(request['config'], request['config_directory'], request.get('refresh', False), request.get('headers'))
-    names = [request['command_name']] if request.get('command_name') else [name for name, command in request['config']['management']['commands'].items() if any(binding.get('context_window') is not None for binding in command.get('model_bindings', []))]
+    names = [request['command_name']] if request.get('command_name') else [name for name, command in request['config']['management']['commands'].items() if any(binding.get('context_window') is not None or binding.get('max_context') for binding in command.get('model_bindings', []))]
     return {'commands': {name: discovery.command(name) for name in names}}
 
 
 def validate_budget(name, binding, entry):
+    if binding.get('max_context') and (entry.get('max_tokens') is None or not entry.get('complete')):
+        raise ValueError(name + ' · ' + binding['id'] + '：目录尚未公布全部目标的上下文上限，请先选择固定档位。')
     errors = [row['error'] for row in entry['destinations'] if row.get('error')]
     if errors:
         raise ValueError(name + ' · ' + binding['id'] + '：' + '; '.join(errors))

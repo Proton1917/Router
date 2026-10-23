@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CatalogSelect, catalogDestination } from './catalogs.jsx';
+import { CatalogSelect, ReasoningControls, catalogDestination } from './catalogs.jsx';
 import { profileUsages } from './model-ownership.js';
 
 export function IntegrationWorkspace({ config, revision, dirty, api, onEdit, onCommand, ui }) {
@@ -61,9 +61,9 @@ export function IntegrationEditor({ id, config, close, save, onCommand, ui }) {
     const item = spec.slots[index];
     const shared = scopes[item.id] === 'shared';
     const existing = profiles.find(([,profile])=>profile.standard.target===backend && profile.standard.model===row.id);
-    if (existing && !shared) { slot(index,{profile:existing[0],label:''}); return; }
+    if (existing && !shared && (!row.reasoning_models || existing[1].standard.reasoning_models)) { slot(index,{profile:existing[0],label:''}); return; }
     const key = shared ? item.profile : `command-model-${crypto.randomUUID().replaceAll('-','')}`;
-    setExtraProfiles(old=>({...old,[key]:{standard:catalogDestination(config,backend,row.id)}}));
+    setExtraProfiles(old=>({...old,[key]:{standard:catalogDestination(config,backend,row)}}));
     setProfileLabels(old=>({...old,[key]:row.name}));
     slot(index,{profile:key,label:''});
   }
@@ -87,6 +87,7 @@ export function IntegrationEditor({ id, config, close, save, onCommand, ui }) {
         <header><h3>模型入口 {index + 1}</h3><label className="check-field"><input type="checkbox" checked={item.visible} onChange={e => slot(index, { visible: e.target.checked })}/>在客户端显示</label></header>
         <div className="form-grid"><div><Field label={`入口 ${index + 1} 的 API 服务`}><select value={backend} onChange={e => {const existing=profiles.find(([,profile])=>profile.standard.target===e.target.value); if(existing)slot(index,{profile:existing[0]}); else {const key=`command-model-${crypto.randomUUID().replaceAll('-','')}`;setExtraProfiles(old=>({...old,[key]:{standard:{target:e.target.value,model:''}}}));slot(index,{profile:key});}}}>{backends.map(([key]) => <option key={key} value={key}>{config.management.labels?.[`backend:${key}`] || key}</option>)}</select></Field><Field label={`入口 ${index+1} 的替换范围`}><select value={scopes[item.id] || 'local'} onChange={e=>setScopes(old=>({...old,[item.id]:e.target.value}))}><option value="local">仅此客户端入口</option><option value="shared">共享配置的全部关联入口</option></select></Field>{scopes[item.id]==='shared' && <p className="catalog-impact">将修改：{profileUsages(config,item.profile).map(item=>item.command || item.integration || item.route).filter((v,i,a)=>a.indexOf(v)===i).join('、')}。</p>}</div>
           <CatalogSelect backend={backend} value={allProfiles[item.profile]?.standard.model} label={`入口 ${index + 1} 的模型`} onSelect={row=>remote(index,row,backend)} savedProfiles={profiles.filter(([,profile])=>profile.standard.target===backend).map(([key])=>({id:key,label:label(key)}))} onProfile={key=>slot(index,{profile:key})}/>
+          <ReasoningControls destination={allProfiles[item.profile]?.standard} label={`入口 ${index+1}`} onChange={destination=>{const key=scopes[item.id]==='shared' || extraProfiles[item.profile] ? item.profile : `command-model-${crypto.randomUUID().replaceAll('-','')}`;setExtraProfiles(old=>({...old,[key]:{...allProfiles[item.profile],standard:destination}}));slot(index,{profile:key});}}/>
           <Field label={`入口 ${index + 1} 的显示名称`} hint="留空时跟随目标模型与后端名称。" wide><input value={item.label} placeholder={label(item.profile)} onChange={e => slot(index, { label: e.target.value })}/></Field>
         </div>
         <details className="advanced"><summary>客户端兼容标识与上下文</summary><p className="muted">兼容标识保留为 <code>{item.model}</code>，后端模型由上方选择决定。</p><div className="form-grid">{['context_window', 'max_output_tokens'].filter(key => item.metadata?.[key] !== undefined).map(key => <Field key={key} label={key === 'context_window' ? '上下文窗口' : '最大输出 tokens'}><input type="number" min="1" value={item.metadata[key]} onChange={e => slot(index, { metadata: { ...item.metadata, [key]: Number(e.target.value) } })}/></Field>)}</div></details>
