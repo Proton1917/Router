@@ -1,9 +1,13 @@
 {
   "project": "Router",
   "title": "Router 控制台界面",
-  "roots": ["command", "workspace", "oauth-settings"],
-  "note": "截图来自本机实际页面。OAuth 参数保存、登录和刷新使用真实 xAI 服务验证。语音转写沿用既有验证截图，示例录音来自 CAiRE/ASCEND test 第 400 条（CC-BY-SA-4.0）。",
+  "roots": ["workspace-home", "workspace", "oauth-settings"],
+  "note": "主界面、实时模型下拉框、集中设置和保存预览来自当前本机页面。语音转写与 OAuth 沿用既有功能验证截图，其外围导航布局以主界面节点为准。示例录音来自 CAiRE/ASCEND test 第 400 条（CC-BY-SA-4.0）。",
   "nodes": [
+    {"id":"workspace-home","title":"启动命令","image":"screenshots/workspace-home-image-0.png","kind":"桌面页面","route":"启动命令","state":"三个常用入口；右下角打开设置","group":"命令与设置","evidence":"observed"},
+    {"id":"live-models","title":"选择后端实时模型","image":"screenshots/live-models-image-0.png","kind":"编辑弹窗","route":"启动命令 / 编辑命令与模型","state":"Antigravity 返回 24 个有名称的模型，直接在下拉框选择；可修改替换范围与后台监控","group":"命令与设置","evidence":"observed"},
+    {"id":"settings-hub","title":"集中设置","image":"screenshots/settings-hub-image-0.png","kind":"设置弹窗","route":"右下角设置","state":"服务参数、客户端接入与 Mods；高级设置包含共享模型、路由和启动方式","group":"命令与设置","evidence":"observed"},
+    {"id":"catalog-apply","title":"模型替换预览","image":"screenshots/catalog-apply-image-0.png","kind":"应用预览","route":"启动命令 / 保存草稿 / 应用修改","state":"从实时目录选择模型并生成关联路由，显示受影响的验证用例","group":"命令与设置","evidence":"observed"},
     {"id":"command","title":"SPT 启动命令","image":"screenshots/spt-command.jpg","kind":"桌面页面","route":"启动命令","state":"显示命令、默认模型与服务","evidence":"observed"},
     {"id":"workspace","title":"选择音频或图片","image":"screenshots/transcription-ready.jpg","kind":"桌面页面","route":"语音转写","state":"配置已生效，等待选择文件","evidence":"observed"},
     {"id":"settings","title":"转写模型与资源设置","image":"screenshots/transcription-settings.jpg","kind":"弹窗","route":"语音转写 / 转写设置","state":"选择模型、修改资源与保留设置，保存草稿并应用","evidence":"observed"},
@@ -12,6 +16,9 @@
     {"id":"oauth-authorized","title":"OAuth 已登录","image":"screenshots/oauth-authorized-image-0.jpg","kind":"登录状态","route":"API 后端 / 编辑接入 / OAuth 登录","state":"显示访问令牌有效期；调用时自动刷新，可重新登录、手动刷新或退出本机账号","group":"OAuth","evidence":"observed"}
   ],
   "edges": [
+    {"from":"workspace-home","to":"live-models","action":"编辑命令与模型 → 选择 API 后端 → 展开模型","back":"取消或保存草稿","evidence":"observed"},
+    {"from":"workspace-home","to":"settings-hub","action":"右下角设置","back":"关闭设置","evidence":"observed"},
+    {"from":"live-models","to":"catalog-apply","action":"选择模型 → 保存草稿 → 应用修改","back":"继续编辑","evidence":"observed"},
     {"from":"command","to":"workspace","action":"转写模型与参数","evidence":"source"},
     {"from":"workspace","to":"settings","action":"转写设置","back":"保存草稿或取消","evidence":"observed"},
     {"from":"workspace","to":"result","action":"选择文件 → 开始处理 → 预览文字稿","back":"关闭文字稿","evidence":"observed"},

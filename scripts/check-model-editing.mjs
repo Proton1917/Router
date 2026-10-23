@@ -24,7 +24,9 @@ async function preview(candidate) {
   }
   return planned;
 }
-assert.deepEqual(await preview(config),config);
+// 校验用例按名称独立执行；生成用例重新排列后，内容仍应完整一致。
+const orderedCases = value => ({...value,validation_cases:[...value.validation_cases].sort((a,b)=>a.name.localeCompare(b.name))});
+assert.deepEqual(orderedCases(await preview(config)),orderedCases(config));
 const entries = Object.entries(manager.commands).flatMap(([command,spec]) => (spec.model_bindings || []).map(binding => ({command,binding})));
 const exclusive = entries.find(({command,binding}) => !binding.route_ids?.length && isExclusiveCommandProfile(config,binding.profile,command,binding.id));
 assert.ok(exclusive,'实际配置需包含独享绑定');

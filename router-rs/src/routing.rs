@@ -246,14 +246,20 @@ impl RouterConfig {
     pub fn from_json(bytes: &[u8]) -> Result<Self> {
         let mut config: Self =
             serde_json::from_slice(bytes).context("config must be valid JSON")?;
+        config.compile_catalog_routes()?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    pub fn compile_catalog_routes(&mut self) -> Result<()> {
         let mut catalog_routes = Vec::new();
-        for client in &config.runtime.clients {
+        for client in &self.runtime.clients {
             let mut commands = HashSet::new();
             for name in &client.catalog_commands {
                 if !commands.insert(name) {
                     bail!("client {} repeats catalog command {name}", client.id);
                 }
-                let command = config
+                let command = self
                     .management
                     .as_ref()
                     .and_then(|m| m.commands.get(name))
@@ -268,17 +274,20 @@ impl RouterConfig {
                     .iter()
                     .filter(|binding| binding.visible)
                 {
+                    let models: Vec<_> = std::iter::once(&binding.model)
+                        .chain(&binding.aliases)
+                        .map(|model| format!("{name}/{model}"))
+                        .collect();
                     catalog_routes.push(serde_json::from_value::<RouteRule>(serde_json::json!({
                         "id":format!("catalog-{}-{name}-{}", client.id, binding.id),
-                        "match":{"contexts":[client.id], "models":[format!("{name}/{}", binding.model)]},
+                        "match":{"contexts":[client.id], "models":models},
                         "profile":binding.profile
                     }))?);
                 }
             }
         }
-        config.routes.splice(0..0, catalog_routes);
-        config.validate()?;
-        Ok(config)
+        self.routes.splice(0..0, catalog_routes);
+        Ok(())
     }
 
     fn validate(&self) -> Result<()> {

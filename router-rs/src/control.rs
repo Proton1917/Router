@@ -173,6 +173,8 @@ pub struct Management {
     pub transcription: Option<crate::transcription::Settings>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub quota_sources: BTreeMap<String, crate::quotas::Source>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub model_catalogs: BTreeMap<String, crate::catalogs::Source>,
 }
 
 impl Management {
@@ -562,7 +564,8 @@ pub fn prepare_candidate(current: &Value, mut candidate: Value) -> Result<(Value
     {
         strip.push(Value::String(manager.command_header.clone()));
     }
-    let parsed: RouterConfig = serde_json::from_value(candidate.clone())?;
+    let mut parsed: RouterConfig = serde_json::from_value(candidate.clone())?;
+    parsed.compile_catalog_routes()?;
     let mut changes = Vec::new();
     for (index, case) in parsed.validation_cases.iter().enumerate() {
         let mut headers = HeaderMap::new();
@@ -700,6 +703,7 @@ pub(crate) struct ControlState {
     _watcher: Arc<std::sync::Mutex<notify::RecommendedWatcher>>,
     pub(crate) transcription: Arc<crate::transcription::Service>,
     pub(crate) quotas: Arc<crate::quotas::Service>,
+    pub(crate) catalogs: Arc<crate::catalogs::Service>,
 }
 
 pub(crate) struct ApiError(anyhow::Error);
@@ -1074,6 +1078,7 @@ pub async fn bind(
     let value = load_value(path)?;
     let manager = management(&value)?;
     let (watcher, changes_receiver) = watch_configuration(path, &value)?;
+    let catalogs = crate::catalogs::Service::start(Arc::new(path.to_owned()), shutdown.clone());
     let state_value = ControlState {
         path: Arc::new(path.to_owned()),
         token: Arc::new(token(path, &manager)?),
@@ -1085,10 +1090,12 @@ pub async fn bind(
         _watcher: Arc::new(std::sync::Mutex::new(watcher)),
         transcription,
         quotas: Arc::new(crate::quotas::Service::default()),
+        catalogs,
     };
     let api = Router::new()
         .merge(crate::oauth::routes())
         .merge(crate::quotas::routes())
+        .merge(crate::catalogs::routes())
         .merge(crate::transcription::routes())
         .route("/state", get(state))
         .route("/changes", get(changes))

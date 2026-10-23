@@ -16,6 +16,7 @@ use reqwest::Client;
 use serde_json::Value;
 
 mod body;
+mod catalogs;
 mod cli;
 mod command_models;
 mod context_limits;

@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { CatalogSelect, catalogDestination } from './catalogs.jsx';
+import { profileUsages } from './model-ownership.js';
 
 export function IntegrationWorkspace({ config, revision, dirty, api, onEdit, onCommand, ui }) {
   const { Button } = ui;
@@ -44,13 +46,27 @@ export function IntegrationEditor({ id, config, close, save, onCommand, ui }) {
   const { Button, Field, Modal } = ui;
   const [spec, setSpec] = useState(structuredClone(config.management.integrations[id]));
   const [error, setError] = useState('');
-  const profiles = Object.entries(config.profiles).filter(([key, profile]) => {
+  const [extraProfiles, setExtraProfiles] = useState({});
+  const [scopes, setScopes] = useState({});
+  const [profileLabels, setProfileLabels] = useState({});
+  const allProfiles = {...config.profiles,...extraProfiles};
+  const profiles = Object.entries(allProfiles).filter(([key, profile]) => {
     const protocols = config.management.backend_protocols?.[profile.standard.target];
     return profile.standard.model && (!protocols || protocols.includes(spec.protocol));
   });
-  const backends = Object.entries(config.runtime.backends).filter(([key]) => profiles.some(([, profile]) => profile.standard.target === key));
-  const label = key => config.management.labels?.[`profile:${key}`] || config.profiles[key]?.standard.model || key;
+  const backends = Object.entries(config.runtime.backends).filter(([key]) => !config.management.backend_protocols?.[key] || config.management.backend_protocols[key].includes(spec.protocol));
+  const label = key => profileLabels[key] || config.management.labels?.[`profile:${key}`] || allProfiles[key]?.standard.model || key;
   function slot(index, changes) { setSpec(old => ({ ...old, slots: old.slots.map((value, at) => at === index ? { ...value, ...changes } : value) })); }
+  function remote(index, row, backend) {
+    const item = spec.slots[index];
+    const shared = scopes[item.id] === 'shared';
+    const existing = profiles.find(([,profile])=>profile.standard.target===backend && profile.standard.model===row.id);
+    if (existing && !shared) { slot(index,{profile:existing[0],label:''}); return; }
+    const key = shared ? item.profile : `command-model-${crypto.randomUUID().replaceAll('-','')}`;
+    setExtraProfiles(old=>({...old,[key]:{standard:catalogDestination(config,backend,row.id)}}));
+    setProfileLabels(old=>({...old,[key]:row.name}));
+    slot(index,{profile:key,label:''});
+  }
   function submit() {
     try {
       const url = new URL(spec.gateway_url);
@@ -58,7 +74,7 @@ export function IntegrationEditor({ id, config, close, save, onCommand, ui }) {
       if (spec.require_https && url.protocol !== 'https:') throw new Error('此客户端需要 HTTPS 接入地址。');
       if (spec.slots.length && !spec.slots.some(item => item.visible)) throw new Error('至少需要显示一个模型入口。');
       if (spec.slots.some(item => !profiles.some(([id]) => id === item.profile))) throw new Error('请为每个入口选择支持客户端协议的模型。');
-      save(spec);
+      save(spec,{profiles:Object.fromEntries(Object.entries(extraProfiles).filter(([key])=>spec.slots.some(slot=>slot.profile===key))),profileLabels});
     } catch (error) { setError(error.message); }
   }
   return <Modal title={`${spec.label} · 接入设置`} eyebrow="客户端接入" close={close} wide footer={<><span className="footer-note">保存后通过“应用修改”同步客户端</span><Button onClick={close}>取消</Button><Button primary onClick={submit}>保存接入草稿</Button></>}>
@@ -66,11 +82,11 @@ export function IntegrationEditor({ id, config, close, save, onCommand, ui }) {
     <Field label="客户端接入地址" hint={spec.require_https ? '使用可信的 HTTPS 网关，检查连接时同时验证证书。' : '客户端将向此网关发送请求。'}><input value={spec.gateway_url} readOnly={spec.commands.length > 0} onChange={e => setSpec(old => ({ ...old, gateway_url: e.target.value }))}/></Field>
     {spec.commands.length > 0 && <section className="form-section"><h3>选择终端入口</h3><div className="integration-commands">{spec.commands.map(name => <button key={name} onClick={() => onCommand(name)}><strong>{name}</strong><span>模型、启动方式与参数 →</span></button>)}</div></section>}
     {spec.slots.map((item, index) => {
-      const backend = config.profiles[item.profile]?.standard.target || '';
+      const backend = allProfiles[item.profile]?.standard.target || '';
       return <section className="integration-slot" key={item.id}>
         <header><h3>模型入口 {index + 1}</h3><label className="check-field"><input type="checkbox" checked={item.visible} onChange={e => slot(index, { visible: e.target.checked })}/>在客户端显示</label></header>
-        <div className="form-grid"><Field label={`入口 ${index + 1} 的 API 服务`}><select value={backend} onChange={e => slot(index, { profile: profiles.find(([, profile]) => profile.standard.target === e.target.value)?.[0] || '' })}>{backends.map(([key]) => <option key={key} value={key}>{config.management.labels?.[`backend:${key}`] || key}</option>)}</select></Field>
-          <Field label={`入口 ${index + 1} 的模型`}><select value={item.profile} onChange={e => slot(index, { profile: e.target.value })}>{profiles.filter(([, profile]) => profile.standard.target === backend).map(([key]) => <option key={key} value={key}>{label(key)}</option>)}</select></Field>
+        <div className="form-grid"><div><Field label={`入口 ${index + 1} 的 API 服务`}><select value={backend} onChange={e => {const existing=profiles.find(([,profile])=>profile.standard.target===e.target.value); if(existing)slot(index,{profile:existing[0]}); else {const key=`command-model-${crypto.randomUUID().replaceAll('-','')}`;setExtraProfiles(old=>({...old,[key]:{standard:{target:e.target.value,model:''}}}));slot(index,{profile:key});}}}>{backends.map(([key]) => <option key={key} value={key}>{config.management.labels?.[`backend:${key}`] || key}</option>)}</select></Field><Field label={`入口 ${index+1} 的替换范围`}><select value={scopes[item.id] || 'local'} onChange={e=>setScopes(old=>({...old,[item.id]:e.target.value}))}><option value="local">仅此客户端入口</option><option value="shared">共享配置的全部关联入口</option></select></Field>{scopes[item.id]==='shared' && <p className="catalog-impact">将修改：{profileUsages(config,item.profile).map(item=>item.command || item.integration || item.route).filter((v,i,a)=>a.indexOf(v)===i).join('、')}。</p>}</div>
+          <CatalogSelect backend={backend} value={allProfiles[item.profile]?.standard.model} label={`入口 ${index + 1} 的模型`} onSelect={row=>remote(index,row,backend)} savedProfiles={profiles.filter(([,profile])=>profile.standard.target===backend).map(([key])=>({id:key,label:label(key)}))} onProfile={key=>slot(index,{profile:key})}/>
           <Field label={`入口 ${index + 1} 的显示名称`} hint="留空时跟随目标模型与后端名称。" wide><input value={item.label} placeholder={label(item.profile)} onChange={e => slot(index, { label: e.target.value })}/></Field>
         </div>
         <details className="advanced"><summary>客户端兼容标识与上下文</summary><p className="muted">兼容标识保留为 <code>{item.model}</code>，后端模型由上方选择决定。</p><div className="form-grid">{['context_window', 'max_output_tokens'].filter(key => item.metadata?.[key] !== undefined).map(key => <Field key={key} label={key === 'context_window' ? '上下文窗口' : '最大输出 tokens'}><input type="number" min="1" value={item.metadata[key]} onChange={e => slot(index, { metadata: { ...item.metadata, [key]: Number(e.target.value) } })}/></Field>)}</div></details>

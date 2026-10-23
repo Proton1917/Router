@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import './commands.css';
-import { customizeCommandProfile } from './model-ownership.js';
+import { customizeCommandProfile, profileUsages } from './model-ownership.js';
+import { CatalogSelect, catalogDestination } from './catalogs.jsx';
 
 export function modelLabel(config, item, profiles = config.profiles, speed = 'standard') {
   const profile = profiles[item.profile];
@@ -39,6 +40,8 @@ export function CommandEditor({ editor, config, close, save, ui, api, workspace 
   const [editingKey] = useState(() => editor.id || `draft-${crypto.randomUUID()}`);
   const [value, setValue] = useState(structuredClone(editor.value));
   const [profiles, setProfiles] = useState({});
+  const [scopes, setScopes] = useState({});
+  const [profileLabels, setProfileLabels] = useState({});
   const [error, setError] = useState('');
   const [invalid, setInvalid] = useState({});
   const [contextLimits, setContextLimits] = useState({});
@@ -83,7 +86,7 @@ export function CommandEditor({ editor, config, close, save, ui, api, workspace 
     return `${detail || ''} ${entry?.complete ? '已按全部目标限制预算。' : discoveryEnabled && !loadingLimits ? '未公布数值的目标，其最大窗口仍未知。' : ''} 可填写 ${template.context_window_range.min.toLocaleString()}～${maximum.toLocaleString()} tokens。留空沿用启动器基线，并受已识别上限限制；修改后重新启动命令。`;
   }
   const set = (key, next) => setValue(old => ({...old,[key]:next}));
-  const label = item => modelLabel(config,item,allProfiles);
+  const label = item => item.label || profileLabels[item.profile] || modelLabel(config,item,allProfiles);
   function update(index, changes) { setValue(old => ({...old,model_bindings:old.model_bindings.map((item,at) => at === index ? {...item,...changes} : item)})); }
   function selectProfile(index, profile) {
     const item = bindings[index];
@@ -93,9 +96,10 @@ export function CommandEditor({ editor, config, close, save, ui, api, workspace 
     setValue(old => ({...old,model:old.model === item.model ? model : old.model,model_bindings:old.model_bindings.map((row,at) => at === index ? {...row,profile,model,aliases,label:'',description:''} : row)}));
   }
   function add() {
-    const profile = eligible[0]?.[0];
-    if (!profile) { setError('请先添加支持此启动方式的 API 后端和模型配置。'); return; }
-    const model = config.management.profile_models?.[profile]?.[protocol] || allProfiles[profile].standard.model;
+    if (!backends.length) { setError('请先在“服务与额度”添加支持此启动方式的 API 后端。'); return; }
+    const profile = eligible[0]?.[0] || `command-model-${crypto.randomUUID().replaceAll('-','')}`;
+    const model = config.management.profile_models?.[profile]?.[protocol] || allProfiles[profile]?.standard.model || '';
+    if (!allProfiles[profile]) setProfiles(old=>({...old,[profile]:{standard:{target:backends[0],model:''}}}));
     setValue(old => {
       const previous = old.model_bindings?.length ? old.model_bindings : old.profile ? [{id:'primary',profile:old.profile,model:old.model || config.management.profile_models?.[old.profile]?.[protocol] || allProfiles[old.profile].standard.model,label:'',description:'',visible:true,aliases:[],route_ids:[]}] : [];
       return {...old,profile:null,match_all_models:false,model:old.model || (old.profile ? previous[0].model : editor.fresh ? model : null),model_bindings:[...previous,{id:`m${crypto.randomUUID().slice(0,8)}`,model,profile,label:'',description:'',visible:true,aliases:[],route_ids:[]}]};
@@ -108,12 +112,25 @@ export function CommandEditor({ editor, config, close, save, ui, api, workspace 
     setProfiles(old => ({...old,[id]:profile}));
     update(index,{profile:id});
   }
+  function selectRemote(index, row, backend) {
+    const item = bindings[index];
+    if (allProfiles[item.profile]?.standard.model === row.id && allProfiles[item.profile]?.standard.target === backend) return;
+    const shared = scopes[item.id] === 'shared';
+    const existing = eligible.find(([,profile]) => profile.standard.target === backend && profile.standard.model === row.id);
+    if (existing && !shared) { selectProfile(index,existing[0]); return; }
+    const id = shared ? item.profile : `command-model-${crypto.randomUUID().replaceAll('-','')}`;
+    const profile = {standard:catalogDestination(config,backend,row.id)};
+    setProfiles(old=>({...old,[id]:profile}));
+    setProfileLabels(old=>({...old,[id]:row.name}));
+    const aliases = [...new Set([...(item.aliases || []),item.model])].filter(alias=>alias && alias !== row.id);
+    setValue(old=>({...old,model:old.model === item.model ? row.id : old.model,model_bindings:old.model_bindings.map((binding,at)=>at===index ? {...binding,profile:id,model:row.id,aliases,label:'',description:'',context_window:null} : binding)}));
+  }
   function destination(index, which) {
     const item = bindings[index];
     const target = allProfiles[item.profile][which];
     return <div className="form-grid command-destination">
-      <Field label={`${which === 'fast' ? 'Fast' : '标准'} API 后端`}><select value={target.target} onChange={event => customize(index,next => { next[which] = {target:event.target.value,model:''}; })}>{backends.map(id => <option key={id} value={id}>{config.management.labels?.[`backend:${id}`] || id}</option>)}</select></Field>
-      <Field label={`${which === 'fast' ? 'Fast' : '标准'} API 模型 ID`}><input value={target.model || ''} onChange={event => customize(index,next => { next[which].model = event.target.value; })}/></Field>
+      {which === 'fast' && <><Field label="Fast API 后端"><select value={target.target} onChange={event => customize(index,next => { next[which] = {target:event.target.value,model:''}; })}>{backends.map(id => <option key={id} value={id}>{config.management.labels?.[`backend:${id}`] || id}</option>)}</select></Field>
+      <CatalogSelect backend={target.target} value={target.model} label="Fast 模型" onSelect={row=>customize(index,next=>{ next[which] = {...catalogDestination(config,target.target,row.id),...(target.provider ? {provider:target.provider} : {})}; })}/></>}
       <Field label={`${which === 'fast' ? 'Fast' : '标准'}供应商`}><input value={target.provider || ''} placeholder="使用后端默认选择" onChange={event => customize(index,next => { if (event.target.value) next[which].provider = event.target.value; else delete next[which].provider; })}/></Field>
       <Field label={`${which === 'fast' ? 'Fast' : '标准'}服务等级`}><select value={target.field_policy?.set?.['/service_tier'] || ''} onChange={event => customize(index,next => { next[which].field_policy ||= {}; next[which].field_policy.set ||= {}; if (event.target.value) next[which].field_policy.set['/service_tier'] = event.target.value; else delete next[which].field_policy.set['/service_tier']; })}><option value="">跟随请求</option><option value="default">标准</option><option value="priority">优先</option><option value="flex">弹性</option>{target.field_policy?.set?.['/service_tier'] && !['default','priority','flex'].includes(target.field_policy.set['/service_tier']) && <option>{target.field_policy.set['/service_tier']}</option>}</select></Field>
     </div>;
@@ -129,7 +146,9 @@ export function CommandEditor({ editor, config, close, save, ui, api, workspace 
       for (const item of bindings) {
         if (!item.model.trim() || !allProfiles[item.profile]) throw new Error('请完整设置每个模型条目。');
         if (item.context_window != null && (!template.context_window_range || !Number.isSafeInteger(item.context_window) || item.context_window < template.context_window_range.min || item.context_window > template.context_window_range.max)) throw new Error('请在启动方式允许的范围内填写上下文预算。');
-        if (item.context_window != null && discoveryEnabled) {
+        const previous = editor.value.model_bindings?.find(row=>row.id===item.id);
+        const budgetUnchanged = previous?.context_window === item.context_window && JSON.stringify(config.profiles[previous?.profile]) === JSON.stringify(allProfiles[item.profile]);
+        if (item.context_window != null && discoveryEnabled && !budgetUnchanged) {
           if (loadingLimits || !contextLimits[item.id]) throw new Error(limitsError || '请等待模型上下文上限读取完成。');
           const failed = contextLimits[item.id].destinations.find(row => row.error);
           if (failed) throw new Error(failed.error);
@@ -138,7 +157,7 @@ export function CommandEditor({ editor, config, close, save, ui, api, workspace 
         for (const id of [item.model,...(item.aliases || [])]) { if (ids.has(id.toLowerCase())) throw new Error(`模型标识重复：${id}`); ids.add(id.toLowerCase()); }
       }
       if (bindings.length && value.model && !bindings.some(item => item.visible && item.model === value.model)) throw new Error('默认模型需要在可见列表中。');
-      save(name,value,{profiles:Object.fromEntries(Object.entries(profiles).filter(([id]) => bindings.some(item => item.profile === id)))});
+      save(name,value,{profiles:Object.fromEntries(Object.entries(profiles).filter(([id]) => bindings.some(item => item.profile === id))),profileLabels});
     } catch (error) { setError(error.message); }
   }
   return <Modal title={editor.fresh ? '新增启动命令' : `${name} · 命令与模型`} eyebrow="启动命令" close={close} wide footer={<><span className="footer-note">路由应用后生效；菜单在下次启动时读取</span><Button onClick={close}>取消</Button><Button primary onClick={submit}>保存草稿</Button></>}>
@@ -157,7 +176,14 @@ export function CommandEditor({ editor, config, close, save, ui, api, workspace 
       {!bindings.length && <div className="callout">{value.profile ? `当前绑定：${config.management.labels?.[`profile:${value.profile}`] || value.profile}。` : '当前沿用现有路由规则。'}<Button onClick={() => { if (value.profile) setValue(old => ({...old,profile:null,match_all_models:false,model_bindings:[{id:'primary',profile:old.profile,model:old.model || config.management.profile_models?.[old.profile]?.[protocol] || allProfiles[old.profile].standard.model,label:'',description:'',visible:true,aliases:[],route_ids:[]}]})); else add(); }}>管理模型列表</Button></div>}
       {bindings.map((item,index) => { const profile = allProfiles[item.profile]; const target = profile?.standard; return <article className="command-model-item" key={item.id}>
         <header><div><span className="model-position">{String(index+1).padStart(2,'0')}</span><strong>{label(item)}</strong><small>{config.management.labels?.[`backend:${target?.target}`] || target?.target}</small></div><div className="model-item-actions"><button aria-label={`上移模型 ${index+1}`} disabled={index === 0} onClick={() => { const next = [...bindings]; [next[index-1],next[index]] = [next[index],next[index-1]]; set('model_bindings',next); }}>↑</button><button aria-label={`下移模型 ${index+1}`} disabled={index === bindings.length-1} onClick={() => { const next = [...bindings]; [next[index+1],next[index]] = [next[index],next[index+1]]; set('model_bindings',next); }}>↓</button><button className="delete-link" aria-label={`删除模型 ${index+1}`} onClick={() => setValue(old => ({...old,model:old.model === item.model ? null : old.model,model_bindings:old.model_bindings.filter(row => row.id !== item.id)}))}>删除</button></div></header>
-        <div className="form-grid"><Field label={`模型 ${index+1} 的 API 后端`}><select value={target?.target || ''} onChange={event => { const found = eligible.find(([,profile]) => profile.standard.target === event.target.value); if (found) selectProfile(index,found[0]); else customize(index,next => { next.standard = {target:event.target.value,model:''}; delete next.fast; }); }}>{backends.map(id => <option key={id} value={id}>{config.management.labels?.[`backend:${id}`] || id}</option>)}</select></Field><Field label={`模型 ${index+1} 的模型配置`}><select value={item.profile} onChange={event => selectProfile(index,event.target.value)}>{eligible.filter(([,profile]) => profile.standard.target === target?.target).map(([id,profile]) => <option key={id} value={id}>{config.management.labels?.[`profile:${id}`] || profile.standard.model}</option>)}</select></Field><Field label={`模型 ${index+1} 的显示名称`} hint="留空时自动跟随当前 API 模型。"><input value={item.label || ''} placeholder={modelLabel(config,{...item,label:''},allProfiles)} onChange={event => update(index,{label:event.target.value})}/></Field><Field label={`模型 ${index+1} 的菜单说明`}><input value={item.description || ''} placeholder="自动显示模型与服务来源" onChange={event => update(index,{description:event.target.value})}/></Field></div>
+        <div className="form-grid">
+          <div><Field label={`模型 ${index+1} 的 API 后端`}><select value={target?.target || ''} onChange={event => { const found = eligible.find(([,profile]) => profile.standard.target === event.target.value); if (found) selectProfile(index,found[0]); else customize(index,next => { next.standard = {target:event.target.value,model:''}; delete next.fast; }); }}>{backends.map(id => <option key={id} value={id}>{config.management.labels?.[`backend:${id}`] || id}</option>)}</select></Field>
+          <Field label={`模型 ${index+1} 的替换范围`}><select value={scopes[item.id] || 'local'} onChange={e=>setScopes(old=>({...old,[item.id]:e.target.value}))}><option value="local">仅此命令入口</option><option value="shared">共享配置的全部关联入口</option></select></Field>
+          {scopes[item.id] === 'shared' && <p className="catalog-impact">将修改：{profileUsages(config,item.profile).map(usage=>usage.command || usage.integration || usage.route).filter((v,i,a)=>a.indexOf(v)===i).join('、') || name}。</p>}</div>
+          <CatalogSelect backend={target?.target} value={target?.model} label={`模型 ${index+1} 的模型`} onSelect={row=>selectRemote(index,row,target.target)} savedProfiles={eligible.filter(([,p])=>p.standard.target===target?.target).map(([id,p])=>({id,label:config.management.labels?.[`profile:${id}`] || p.standard.model}))} onProfile={id=>selectProfile(index,id)}/>
+          <Field label={`模型 ${index+1} 的显示名称`} hint="留空时自动跟随当前 API 模型。"><input value={item.label || ''} placeholder={modelLabel(config,{...item,label:''},allProfiles)} onChange={event => update(index,{label:event.target.value})}/></Field>
+          <Field label={`模型 ${index+1} 的菜单说明`}><input value={item.description || ''} placeholder="自动显示模型与服务来源" onChange={event => update(index,{description:event.target.value})}/></Field>
+        </div>
         <div className="command-model-options"><label className="check-field"><input type="checkbox" checked={item.visible} onChange={event => update(index,{visible:event.target.checked})}/>在客户端菜单显示</label><span>Fast：{profile?.fast ? [profile.fast.model || item.model,config.management.labels?.[`backend:${profile.fast.target}`] || profile.fast.target,profile.fast.provider].filter(Boolean).join(' · ') : '沿用标准目标'}</span></div>
         {template.context_window_range && <Field label={`模型 ${index+1} 的上下文预算（tokens）`} hint={contextHint(item)}><input type="number" min={template.context_window_range.min} max={contextMaximum(item)} step="1" value={item.context_window ?? ''} placeholder="沿用启动器基线" onChange={event => update(index,{context_window:event.target.value === '' ? null : Number(event.target.value)})}/></Field>}
         <details className="advanced"><summary>自定义标准与 Fast 目标</summary><p className="muted">独享配置直接更新；共享配置会生成此入口使用的独立副本。</p>{destination(index,'standard')}<label className="check-field"><input type="checkbox" checked={!!profile?.fast} onChange={event => customize(index,next => { if (event.target.checked) next.fast = structuredClone(next.standard); else delete next.fast; })}/>单独配置 Fast 目标</label>{profile?.fast && destination(index,'fast')}</details>
