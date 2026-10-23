@@ -7,12 +7,12 @@
 取得源码后，在项目根目录执行。需要 macOS 14+、Xcode Command Line Tools、Rust stable（Tauri 2.12 要求至少 Rust 1.90）、Node.js 20.19+ 或 22.12+、npm 和 Pixi。依赖由 Cargo、npm 和 Pixi 锁文件固定。
 
 ```sh
-git clone --branch v0.4.0 https://github.com/Proton1917/Router.git
+git clone --branch v0.5.0 https://github.com/Proton1917/Router.git
 cd Router
 npm ci --prefix desktop
 # 下载本版本配套的 SPT worker 源码，并构建其 release 程序。
 mkdir -p .work/spt-source
-curl -fL https://github.com/Proton1917/Router/releases/download/v0.4.0/spt-worker-6f5af7f.tar.gz -o .work/spt-worker.tar.gz
+curl -fL https://github.com/Proton1917/Router/releases/download/v0.5.0/spt-worker-6f5af7f.tar.gz -o .work/spt-worker.tar.gz
 tar -xzf .work/spt-worker.tar.gz -C .work/spt-source --strip-components=1
 RUSTFLAGS="--remap-path-prefix=$HOME=/build-home --remap-path-prefix=$PWD=/router" \
   cargo build --release --locked --manifest-path .work/spt-source/Cargo.toml
