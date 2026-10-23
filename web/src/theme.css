@@ -42,6 +42,7 @@
   html:root .reasoning-controls summary, html:root .model-position { color: #b8c8b3; }
   html:root :is(.inline-error,.integration-error,.spt-failure,.spt-state.failed,.spt-state.interrupted) { color: #ffb29c; }
   html:root .spt-error { background: #442d26; border-color: #cf8b7154; color: #ffc2ad; }
+  html:root .command-save-error { background: #442d26; border: 1px solid #cf8b7154; }
   html:root .mod-availability, html:root .chips .amber-chip { background: #4e42295c; color: #e8d19b; border-color: #b9a36a40; }
   html:root .transcription-workspace { --spt-surface: #2d372fd6; --spt-fill: #b6d3b30c; --spt-border: #b9cfb52b; }
   html:root .spt-file-icon { background: #b9d2b915; }

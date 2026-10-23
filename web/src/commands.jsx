@@ -143,7 +143,8 @@ export function CommandEditor({ editor, config, close, save, ui, api, workspace 
     const profile = {standard:catalogDestination(config,backend,row)};
     setProfiles(old=>({...old,[id]:profile}));
     setProfileLabels(old=>({...old,[id]:row.name}));
-    const aliases = [...new Set([...(item.aliases || []),item.model])].filter(alias=>alias && alias !== row.id);
+    const saved = editor.value.model_bindings?.some(binding=>binding.id===item.id);
+    const aliases = [...new Set([...(item.aliases || []),...(saved ? [item.model] : [])])].filter(alias=>alias && alias !== row.id);
     setValue(old=>({...old,model:old.model === item.model ? row.id : old.model,model_bindings:old.model_bindings.map((binding,at)=>at===index ? {...binding,profile:id,model:row.id,aliases,label:'',description:'',context_window:null} : binding)}));
   }
   function destination(index, which) {
@@ -182,7 +183,7 @@ export function CommandEditor({ editor, config, close, save, ui, api, workspace 
       save(name,value,{profiles:Object.fromEntries(Object.entries(profiles).filter(([id]) => bindings.some(item => item.profile === id))),profileLabels});
     } catch (error) { setError(error.message); }
   }
-  return <Modal title={editor.fresh ? '新增启动命令' : `${name} · 命令与模型`} eyebrow="启动命令" close={close} wide footer={<><span className="footer-note">路由应用后生效；菜单在下次启动时读取</span><Button onClick={close}>取消</Button><Button primary onClick={submit}>保存草稿</Button></>}>
+  return <Modal title={editor.fresh ? '新增启动命令' : `${name} · 命令与模型`} eyebrow="启动命令" close={close} wide footer={<>{error && <div className="integration-error command-save-error" role="alert">{error}</div>}<span className="footer-note">路由应用后生效；菜单在下次启动时读取</span><Button onClick={close}>取消</Button><Button primary onClick={submit}>保存草稿</Button></>}>
     {transcription && <div className="callout">模型、分段、输出与保留设置和语音转写页面同步。<Button onClick={()=>{close();workspace('transcription');}}>编辑转写模型与参数</Button></div>}
     <div className="form-grid">
       <Field label="命令名称"><input value={name} onChange={event => setName(event.target.value)}/></Field>
@@ -222,6 +223,5 @@ export function CommandEditor({ editor, config, close, save, ui, api, workspace 
       <Field label="路由插入位置"><select value={value.route_before || ''} onChange={event => set('route_before',event.target.value || null)}><option value="">使用启动方式配置</option>{config.routes.filter(route => !config.management.generated_routes?.includes(route.id)).map(route => <option key={route.id} value={route.id}>{route.id}</option>)}</select></Field>
       {[['args','附加参数',[]],['env','环境变量',{}],['unset_env','清除继承的环境变量',[]]].map(([key,label,empty]) => <JsonField key={key} label={label} value={value[key] || empty} onChange={next => set(key,next)} onError={bad => setInvalid(old => ({...old,[key]:bad}))} rows={3}/>)}
     </details>
-    {error && <div className="integration-error" role="alert">{error}</div>}
   </Modal>;
 }
