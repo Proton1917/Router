@@ -42,7 +42,7 @@ brew install --cask Proton1917/tap/router
 open -a Router
 ```
 
-也可在 [v0.5.0 Release](https://github.com/Proton1917/Router/releases/tag/v0.5.0) 下载 `Router_0.5.0_aarch64.dmg`，打开后将 **Router.app** 拖入“应用程序”。
+也可在 [v0.6.0 Release](https://github.com/Proton1917/Router/releases/tag/v0.6.0) 下载 `Router_0.6.0_aarch64.dmg`，打开后将 **Router.app** 拖入“应用程序”。
 
 如需验证下载完整性，将安装包与同页的 `SHA256SUMS.txt` 放在同一目录，在该目录执行：
 
@@ -50,7 +50,7 @@ open -a Router
 shasum -a 256 --ignore-missing -c SHA256SUMS.txt
 ```
 
-确认输出 `Router_0.5.0_aarch64.dmg: OK`。校验文件也包含配套 SPT 源码包的记录，`--ignore-missing` 允许只下载桌面安装包。
+确认输出 `Router_0.6.0_aarch64.dmg: OK`。校验文件也包含配套 SPT 源码包的记录，`--ignore-missing` 允许只下载桌面安装包。
 
 当前应用采用 ad-hoc 签名，尚未经过 Apple 公证。首次打开受到 Gatekeeper 阻止时，确认下载来源后，在“系统设置 → 隐私与安全性”中允许打开。
 
