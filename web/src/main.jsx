@@ -8,6 +8,7 @@ import { ModsWorkspace } from './mods.jsx';
 import { TranscriptionWorkspace } from './transcription.jsx';
 import { CommandEditor, CommandList } from './commands.jsx';
 import { OAuthFields } from './oauth.jsx';
+import { QuotaOverview } from './quotas.jsx';
 import { plannedProfileRouteCount, pruneDetachedCommandProfiles } from './model-ownership.js';
 import './mods.css';
 
@@ -272,6 +273,7 @@ function App() {
         {section === 'integrations' && <IntegrationWorkspace config={draft} revision={snapshot.revision} dirty={dirty} api={api} ui={{Button,Field,Modal}} onEdit={setIntegrationEditor} onCommand={name => setEditor({kind:'commands',id:name,value:copy(draft.management.commands[name])})}/>}
         {section === 'mods' && <ModsWorkspace config={draft} dirty={dirty} api={api} mutate={mutate} editing={setModsEditing} ui={{Button,Field,Modal}}/>}
         {section === 'transcription' && <TranscriptionWorkspace config={draft} dirty={dirty} api={api} mutate={mutate} editing={setModsEditing} ui={{Button,Field,Modal}}/>}
+        {section === 'backends' && <QuotaOverview config={snapshot.config} api={api} Button={Button}/>}
         {!['integrations','mods','transcription'].includes(section) && <div className="summary-strip">{metrics.map(([title, count]) => <div key={title}><strong>{count.toString().padStart(2, '0')}</strong><span>{title}</span></div>)}<div className="summary-note"><span className="mini-label">配置状态</span><span className={dirty ? 'text-amber' : 'text-green'}>{dirty ? '有未应用的修改' : '与本机文件一致'}</span></div></div>}
         {!['settings','integrations','mods','transcription'].includes(section) && <div className="table-toolbar"><label className="search"><Icon name="search"/><input aria-label="搜索配置" value={query} onChange={e => setQuery(e.target.value)} placeholder={`搜索${active[1]}…`}/><kbd>⌕</kbd></label><span>{rows.length} 项配置</span></div>}
         {section === 'commands' && <><CommandList config={draft} rows={rows} dirty={dirty} ui={{Button}} workspace={setSection} edit={(id,value) => setEditor({kind:'commands',id,value:copy(value)})} preview={id => task(async () => setDetails({title:`${id} · 启动预览`,value:await api('commands/preview',{name:id,args:[]})}))} remove={id => remove('commands',id)} toggle={(id,value) => mutate(config => { config.management.commands[id].enabled = value.enabled === false; })}/>{!rows.length && <Empty text="添加命令，并配置它的可选模型。" onAdd={add}/>}</>}

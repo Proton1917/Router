@@ -1,0 +1,33 @@
+{
+  "antigravity": {
+    "label": "Antigravity",
+    "backends": ["antigravity"],
+    "adapter": {"program": "python3", "args": ["{{ config_directory }}/scripts/provider-quota.py"]},
+    "ttl_seconds": 60,
+    "timeout_seconds": 30,
+    "settings": {
+      "kind": "antigravity",
+      "credential_file": "~/.config/router/credentials/antigravity/account.json",
+      "url": "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
+      "headers": {"User-Agent": "antigravity/hub/2.25.0 darwin/arm64"},
+      "group_labels": {"Gemini Models": "Gemini 模型", "Claude and GPT models": "Claude / GPT 模型"},
+      "window_labels": {"weekly": "每周额度", "5h": "五小时额度"}
+    }
+  },
+  "grok": {
+    "label": "Grok",
+    "backends": ["xai-oauth", "xai-build"],
+    "auth_backend": "xai-oauth",
+    "adapter": {"program": "python3", "args": ["{{ config_directory }}/scripts/provider-quota.py"]},
+    "ttl_seconds": 60,
+    "timeout_seconds": 30,
+    "settings": {
+      "kind": "grok",
+      "url": "https://cli-chat-proxy.grok.com/v1/billing?format=credits",
+      "headers": {"x-xai-token-auth": "xai-grok-cli", "x-grok-client-version": "1.0.46"},
+      "period_labels": {"USAGE_PERIOD_TYPE_WEEKLY": "每周额度", "USAGE_PERIOD_TYPE_MONTHLY": "每月额度"},
+      "product_labels": {"GrokBuild": "Build", "GrokChat": "Chat"},
+      "balance_labels": {"prepaidBalance": "额外用量余额", "onDemandUsed": "按量已用", "onDemandCap": "按量支出上限"}
+    }
+  }
+}

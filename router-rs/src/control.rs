@@ -171,6 +171,8 @@ pub struct Management {
     pub context_discovery: Option<crate::context_limits::ContextDiscovery>,
     #[serde(default)]
     pub transcription: Option<crate::transcription::Settings>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub quota_sources: BTreeMap<String, crate::quotas::Source>,
 }
 
 impl Management {
@@ -697,6 +699,7 @@ pub(crate) struct ControlState {
     shutdown: tokio::sync::watch::Receiver<bool>,
     _watcher: Arc<std::sync::Mutex<notify::RecommendedWatcher>>,
     pub(crate) transcription: Arc<crate::transcription::Service>,
+    pub(crate) quotas: Arc<crate::quotas::Service>,
 }
 
 pub(crate) struct ApiError(anyhow::Error);
@@ -1081,9 +1084,11 @@ pub async fn bind(
         shutdown,
         _watcher: Arc::new(std::sync::Mutex::new(watcher)),
         transcription,
+        quotas: Arc::new(crate::quotas::Service::default()),
     };
     let api = Router::new()
         .merge(crate::oauth::routes())
+        .merge(crate::quotas::routes())
         .merge(crate::transcription::routes())
         .route("/state", get(state))
         .route("/changes", get(changes))

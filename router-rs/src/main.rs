@@ -24,6 +24,7 @@ mod integrations;
 mod mods;
 mod oauth;
 mod prepare;
+mod quotas;
 mod routing;
 mod runtime;
 mod server;
