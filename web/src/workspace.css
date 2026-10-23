@@ -1,11 +1,19 @@
+.application { height: 100dvh; min-height: 0; overflow: hidden; }
+html, body, #root { height: 100%; overflow: hidden; overscroll-behavior: none; }
+.application > main { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.application > main > .topbar { flex-shrink: 0; }
+.application > main > .page-content { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: none; }
+.application > main:not(.settings-panel) > .page-content { width: 100%; max-width: none; margin: 0; }
+.sidebar, .settings-navigation, .modal-body, .table-panel, .review-list, textarea { overscroll-behavior: none; }
+.modal > header, .modal > footer { flex-shrink: 0; }
+.modal-body { min-height: 0; }
 .sidebar nav button { justify-content: flex-start; gap: 12px; }
 .sidebar .sidebar-footer { padding-bottom: 20px; }
 .page-content { padding-bottom: 100px; }
 .page-heading h1 { font-size: 30px; letter-spacing: -.5px; }
 .page-heading p { max-width: 640px; }
-.settings-trigger { position: fixed; right: 24px; bottom: 22px; z-index: 42; display: flex; align-items: center; gap: 8px; padding: 12px 16px; border: 1px solid rgba(115,140,122,.2); border-radius: 18px; background: rgba(255,255,255,.78); color: var(--ink); backdrop-filter: blur(24px) saturate(140%); box-shadow: 0 8px 30px #203a2d15; }
+.settings-trigger { position: fixed; left: 24px; bottom: 22px; z-index: 42; display: flex; align-items: center; gap: 8px; padding: 12px 16px; border: 1px solid rgba(115,140,122,.2); border-radius: 18px; background: rgba(255,255,255,.78); color: var(--ink); backdrop-filter: blur(24px) saturate(140%); box-shadow: 0 8px 30px #203a2d15; }
 .settings-trigger:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
-.savebar.is-dirty { right: 140px; }
 .settings-scrim { position: fixed; inset: 0; z-index: 49; background: #10221855; backdrop-filter: blur(8px); }
 main.settings-panel { position: fixed; inset: 5vh 5vw; margin: 0; z-index: 50; background: rgba(248,250,246,.95); border: 1px solid #ffffffb0; border-radius: 24px; overflow: hidden; box-shadow: 0 30px 100px #00170b35; backdrop-filter: blur(32px) saturate(130%); }
 .settings-panel .topbar { position: relative; top: 0; left: 0; right: 0; height: 70px; padding: 0 28px; }
@@ -26,6 +34,11 @@ html[data-desktop] .settings-panel .topbar { padding-top: 0; }
 html[data-desktop] .settings-panel .page-content { padding-top: 30px; }
 html[data-desktop] .settings-trigger { background: #fafff9a8; border-color: #ffffffbb; box-shadow: inset 0 1px 1px #fff, 0 8px 25px #1c35271a; }
 html[data-desktop] .page-heading h1 { font-size: 30px; }
+@media(max-width: 800px) {
+  .application { display: flex; flex-direction: column; }
+  .application > .sidebar { flex-shrink: 0; }
+  .application > main { flex: 1; min-height: 0; }
+}
 @media(max-width: 900px) {
   main.settings-panel { inset: 2vh 2vw; }
   .settings-navigation { width: 155px; padding: 16px 8px; }
@@ -42,7 +55,8 @@ html[data-desktop] .page-heading h1 { font-size: 30px; }
   .settings-navigation details { margin: 0; min-width: 90px; }
   .settings-panel .page-content { margin: 0; flex: 1; min-height: 0; height: auto; }
   .settings-panel .savebar { left: 10px; right: 10px; }
-  .settings-trigger { right: 16px; bottom: 16px; padding: 10px 12px; }
-  .savebar.is-dirty { right: 90px; }
+  .settings-trigger { left: 16px; bottom: 16px; padding: 10px 12px; }
+  .savebar.is-dirty { left: 100px; right: 0; }
+  .savebar.is-dirty > div:first-child { display: none; }
 }
 @media(prefers-reduced-motion: reduce) { .settings-trigger, .settings-panel { transition: none; } }
