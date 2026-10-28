@@ -574,7 +574,13 @@ impl RouterConfig {
                 )
             })
             .context("no route matched; configuration is missing a catch-all rule")?;
-        let fast_mode = explicit_fast.unwrap_or(route.use_settings_fast_mode && settings_fast_mode);
+        let fast_mode = explicit_fast.unwrap_or_else(|| {
+            self.runtime
+                .clients
+                .iter()
+                .any(|client| client.id == context && client.default_fast)
+                || (route.use_settings_fast_mode && settings_fast_mode)
+        });
         let profile = self
             .profiles
             .get(&route.profile)

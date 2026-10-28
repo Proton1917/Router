@@ -134,6 +134,8 @@ router config check
 
 运行 `python3 scripts/check-speed-sources.py /absolute/path/to/router.json <command>` 可向当前命令的真实接口发送路由预览请求，检查配置来源、标准选择和主要速度字段的优先顺序。该检查依赖 `requests`，不发送上游生成请求。
 
+`runtime.clients[].default_fast` 为匹配的客户端设置默认速度，缺省值为 `false`。请求省略全部适用速度字段时，`true` 选择该模型的 Fast 目标；显式速度字段优先，`speed: "standard"` 选择标准目标。此默认值也适用于 `catalog_commands` 生成的共享目录入口。模型的 Fast 目标缺省时复用标准目标。
+
 Fast 是选择快速目标的客户端开关。快速目标可以指定独立 API 模型、后端、供应商和上游服务等级；命令编辑器的摘要显示其实际供应商。`validation_cases[].request_fields` 可按 JSON Pointer 设置额外请求字段，用于校验这些速度来源及其优先顺序。
 
 Claude Code API 启动方式通过 `options.router-speed` 提供“Fast 控制方式”。默认选择“客户端 /fast”，在会话内使用原生 `/fast` 开关；每个模型使用自身配置的标准或快速目标。也可选择固定标准或固定 Fast，固定 Fast 的客户端模型名称带有 `Router Fast`。应用启动配置后重新启动命令；恢复已有会话可使用 `<命令> --continue`。

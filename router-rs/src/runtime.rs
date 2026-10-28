@@ -140,6 +140,9 @@ impl HeaderPredicate {
 #[serde(deny_unknown_fields)]
 pub struct ClientConfig {
     pub id: String,
+    /// 请求省略速度字段时采用此客户端的 Fast 默认值。
+    #[serde(default)]
+    pub default_fast: bool,
     #[serde(default)]
     pub catalog_commands: Vec<String>,
     #[serde(default)]
