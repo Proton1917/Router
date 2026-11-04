@@ -303,6 +303,119 @@ fn storage(path: &Path, id: &str) -> Result<PathBuf> {
         .join(format!("{id}.json")))
 }
 
+fn read_snapshot(path: &Path, id: &str) -> Result<Option<Snapshot>> {
+    match std::fs::read(storage(path, id)?) {
+        Ok(bytes) => match serde_json::from_slice(&bytes) {
+            Ok(snapshot) => Ok(Some(snapshot)),
+            Err(_) => {
+                eprintln!("模型目录 {id} 缓存格式变化，等待目录同步");
+                Ok(None)
+            }
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+pub(crate) fn shared_models(
+    path: &Path,
+    config: &crate::routing::RouterConfig,
+    client: &crate::runtime::ClientConfig,
+) -> Result<Vec<Value>> {
+    let manager = config.management.as_ref().context("模型目录缺少管理配置")?;
+    let mut catalogs = BTreeMap::new();
+    let mut models = Vec::new();
+    for name in &client.catalog_commands {
+        for binding in manager.commands[name]
+            .model_bindings
+            .iter()
+            .filter(|binding| binding.visible)
+        {
+            let input_model = config.runtime.selection.normalize_model_id(&binding.model);
+            let profile = &config.profiles[&binding.profile];
+            let label = if binding.label.is_empty() {
+                profile.standard.model.as_deref().unwrap_or(&binding.model)
+            } else {
+                &binding.label
+            };
+            let mut row = json!({
+                "id":format!("{name}/{input_model}"), "object":"model", "type":"model",
+                "name":format!("{label} · {name}"), "display_name":format!("{label} · {name}"),
+                "owned_by":"router", "context_window":binding.context_window,
+                "supported_endpoint_types":manager.backend_protocols.get(&profile.standard.target)
+            });
+            let mut common: Option<Vec<String>> = None;
+            let mut complete = true;
+            for destination in std::iter::once(&profile.standard).chain(profile.fast.as_ref()) {
+                let target = &destination.target;
+                if !catalogs.contains_key(target) {
+                    let source = manager
+                        .model_catalogs
+                        .get(target)
+                        .cloned()
+                        .unwrap_or_default();
+                    let snapshot = match read_snapshot(path, target) {
+                        Ok(snapshot) => snapshot.filter(|snapshot| {
+                            snapshot.source == source
+                                && snapshot.base_url == config.runtime.backends[target].base_url
+                        }),
+                        Err(error) => {
+                            eprintln!("共享模型目录 {target} 元数据读取失败: {error}");
+                            None
+                        }
+                    };
+                    catalogs.insert(
+                        target.clone(),
+                        snapshot.map(|snapshot| {
+                            snapshot
+                                .models
+                                .into_iter()
+                                .map(|model| (model.id.clone(), model))
+                                .collect::<BTreeMap<_, _>>()
+                        }),
+                    );
+                }
+                let ids = if let Some(policy) = &destination.reasoning_models {
+                    if policy.follow_request {
+                        policy.models.values().cloned().collect::<Vec<_>>()
+                    } else {
+                        vec![policy.models[&policy.default_effort].clone()]
+                    }
+                } else {
+                    vec![destination.model.clone().unwrap_or_else(|| {
+                        destination
+                            .model_template
+                            .as_deref()
+                            .unwrap_or("{model}")
+                            .replace("{model}", &input_model)
+                    })]
+                };
+                for id in ids {
+                    let capabilities = catalogs[target]
+                        .as_ref()
+                        .and_then(|models| models.get(&id))
+                        .map(|model| &model.capabilities)
+                        .filter(|capabilities| !capabilities.is_empty());
+                    if let Some(capabilities) = capabilities {
+                        if let Some(common) = &mut common {
+                            common.retain(|capability| capabilities.contains(capability));
+                        } else {
+                            common = Some(capabilities.clone());
+                        }
+                    } else {
+                        complete = false;
+                    }
+                }
+            }
+            if complete && let Some(capabilities) = common {
+                row["capabilities"] = json!(capabilities);
+            }
+            models.push(row);
+        }
+    }
+    Ok(models)
+}
+
 fn save(path: &Path, snapshot: &Snapshot) -> Result<()> {
     let directory = path.parent().context("目录缓存路径无效")?;
     std::fs::create_dir_all(directory)?;
@@ -426,14 +539,7 @@ impl Service {
         };
         let mut cache = entry.lock().await;
         if cache.is_none() {
-            match std::fs::read(&file) {
-                Ok(bytes) => match serde_json::from_slice(&bytes) {
-                    Ok(snapshot) => *cache = Some(snapshot),
-                    Err(_) => eprintln!("模型目录 {id} 缓存格式变化，将从服务端重新读取"),
-                },
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error.into()),
-            }
+            *cache = read_snapshot(path, id)?;
         }
         if cache
             .as_ref()

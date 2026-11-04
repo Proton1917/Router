@@ -266,38 +266,8 @@ async fn proxy_inner(
 
     if method == Method::GET && protocol == Protocol::Models && !client.catalog_commands.is_empty()
     {
-        let manager = runtime_config
-            .management
-            .as_ref()
-            .context("模型目录缺少管理配置")?;
-        let mut models = Vec::new();
-        for name in &client.catalog_commands {
-            for binding in manager.commands[name]
-                .model_bindings
-                .iter()
-                .filter(|binding| binding.visible)
-            {
-                let model_id = format!(
-                    "{name}/{}",
-                    runtime_config
-                        .runtime
-                        .selection
-                        .normalize_model_id(&binding.model)
-                );
-                let profile = &runtime_config.profiles[&binding.profile];
-                let label = if binding.label.is_empty() {
-                    profile.standard.model.as_deref().unwrap_or(&binding.model)
-                } else {
-                    &binding.label
-                };
-                models.push(serde_json::json!({
-                    "id":model_id, "object":"model", "type":"model",
-                    "name":format!("{label} · {name}"), "display_name":format!("{label} · {name}"),
-                    "owned_by":"router", "context_window":binding.context_window,
-                    "supported_endpoint_types":manager.backend_protocols.get(&profile.standard.target)
-                }));
-            }
-        }
+        let models =
+            catalogs::shared_models(&state.runtime_routing_config, runtime_config, client)?;
         eprintln!(
             "{method} {uri} client={} -> local catalog models={}",
             client.id,
