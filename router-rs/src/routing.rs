@@ -18,6 +18,8 @@ pub struct RouterConfig {
     pub management: Option<crate::control::Management>,
     pub profiles: HashMap<String, ModelProfile>,
     pub routes: Vec<RouteRule>,
+    #[serde(skip)]
+    catalog_models: HashMap<String, HashSet<String>>,
     #[serde(default, rename = "catalog", alias = "word_gateway")]
     pub word_gateway: CatalogConfig,
     #[serde(default)]
@@ -271,6 +273,7 @@ impl RouterConfig {
 
     pub fn compile_catalog_routes(&mut self) -> Result<()> {
         let mut catalog_routes = Vec::new();
+        self.catalog_models.clear();
         for client in &self.runtime.clients {
             let mut commands = HashSet::new();
             for name in &client.catalog_commands {
@@ -296,6 +299,14 @@ impl RouterConfig {
                         .chain(&binding.aliases)
                         .map(|model| format!("{name}/{model}"))
                         .collect();
+                    self.catalog_models
+                        .entry(client.id.clone())
+                        .or_default()
+                        .extend(
+                            models
+                                .iter()
+                                .map(|model| self.runtime.selection.normalize_model_id(model)),
+                        );
                     catalog_routes.push(serde_json::from_value::<RouteRule>(serde_json::json!({
                         "id":format!("catalog-{}-{name}-{}", client.id, binding.id),
                         "match":{"contexts":[client.id], "models":models},
@@ -557,6 +568,11 @@ impl RouterConfig {
             .and_then(Value::as_str)
             .unwrap_or_default();
         let explicit_fast = self.runtime.selection.requested_fast(context, body);
+        if let Some(models) = self.catalog_models.get(context)
+            && !models.contains(&self.runtime.selection.normalize_model_id(model))
+        {
+            return Err(crate::runtime::ClientAccessError::Model.into());
+        }
         let route = self
             .routes
             .iter()

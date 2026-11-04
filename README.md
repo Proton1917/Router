@@ -134,6 +134,8 @@ Cherry Studio 等客户端可添加自定义提供商，Base URL 填写 Router �
 
 `runtime.clients[].catalog_commands` 可以列出要共享的启动命令，例如 `["cc","ccor","cdx"]`。请求匹配这个客户端后，`GET /v1/models` 返回这些命令的可见模型，模型 ID 为 `命令/模型名称`；同一 ID 的推理请求自动使用对应模型配置及其标准/Fast 目标。修改命令中的模型绑定后，目录和路由随配置更新。具体配置见 [OAuth 与客户端接入参考](docs/oauth.md#共享模型目录)。
 
+共享入口的目录和生成请求均携带配置的客户端认证标记。本机通用应用使用 `Authorization: Bearer router-local-client` 或 `x-api-key: router-local-client`，Messages Base URL 为 `http://127.0.0.1:43177/v1`，OAuth Gemini 使用完整 ID `cc/gemini-3.8-flash-high`。认证错误返回 401；共享目录范围外的模型返回 403。各部署通过 `runtime.clients[].authentication` 明确声明认证及匿名入口，详见上述接入参考。
+
 客户端可设置 `default_fast: true`，为省略速度字段的请求选择模型自身的 Fast 目标。显式速度字段优先，便于应用单独选择 Standard；其他客户端保留各自的速度配置。
 
 ## 管理多个模型、Fast 和上下文

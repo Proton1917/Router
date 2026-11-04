@@ -202,12 +202,28 @@ async fn proxy(State(state): State<AppState>, req: Request) -> Response {
     let mut response = match result {
         Ok(response) => response,
         Err(error) => {
-            eprintln!("router error: {error:#}");
-            (
-                StatusCode::BAD_GATEWAY,
-                format!("router upstream error: {error:#}"),
-            )
-                .into_response()
+            if let Some(access) = error.downcast_ref::<runtime::ClientAccessError>() {
+                let (status, kind) = match access {
+                    runtime::ClientAccessError::Authentication => {
+                        (StatusCode::UNAUTHORIZED, "authentication_error")
+                    }
+                    runtime::ClientAccessError::Model => {
+                        (StatusCode::FORBIDDEN, "permission_error")
+                    }
+                };
+                eprintln!(
+                    "router request rejected: status={} type={kind}",
+                    status.as_u16()
+                );
+                (status, axum::Json(serde_json::json!({"type":"error","error":{"type":kind,"message":access.to_string()}}))).into_response()
+            } else {
+                eprintln!("router error: {error:#}");
+                (
+                    StatusCode::BAD_GATEWAY,
+                    format!("router upstream error: {error:#}"),
+                )
+                    .into_response()
+            }
         }
     };
     if let Ok(config) = config {
@@ -242,11 +258,11 @@ async fn proxy_inner(
         .protocol_for(uri.path())
         .context("request path is not configured in server.endpoints")?;
     let messages_protocol = protocol == Protocol::Messages;
-    let client = runtime_config.runtime.client_for(&headers, uri.path())?;
-    let word_gateway = client.word_gateway;
     if method == Method::OPTIONS {
         return cors_preflight_response(&headers, &runtime_config.runtime.cors);
     }
+    let client = runtime_config.runtime.client_for(&headers, uri.path())?;
+    let word_gateway = client.word_gateway;
 
     if method == Method::GET && protocol == Protocol::Models && !client.catalog_commands.is_empty()
     {
@@ -261,6 +277,13 @@ async fn proxy_inner(
                 .iter()
                 .filter(|binding| binding.visible)
             {
+                let model_id = format!(
+                    "{name}/{}",
+                    runtime_config
+                        .runtime
+                        .selection
+                        .normalize_model_id(&binding.model)
+                );
                 let profile = &runtime_config.profiles[&binding.profile];
                 let label = if binding.label.is_empty() {
                     profile.standard.model.as_deref().unwrap_or(&binding.model)
@@ -268,13 +291,18 @@ async fn proxy_inner(
                     &binding.label
                 };
                 models.push(serde_json::json!({
-                    "id":format!("{name}/{}", runtime_config.runtime.selection.normalize_model_id(&binding.model)), "object":"model", "type":"model",
+                    "id":model_id, "object":"model", "type":"model",
                     "name":format!("{label} · {name}"), "display_name":format!("{label} · {name}"),
                     "owned_by":"router", "context_window":binding.context_window,
                     "supported_endpoint_types":manager.backend_protocols.get(&profile.standard.target)
                 }));
             }
         }
+        eprintln!(
+            "{method} {uri} client={} -> local catalog models={}",
+            client.id,
+            models.len()
+        );
         return Ok(
             axum::Json(serde_json::json!({"object":"list","data":models,"has_more":false}))
                 .into_response(),

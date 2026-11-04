@@ -41,8 +41,8 @@
       }
     },
     "clients": [
-      {"id": "responses-client", "paths": ["/v1/responses", "/v1/responses/*"]},
-      {"id": "messages-client", "response_errors": {
+      {"id": "responses-client", "paths": ["/v1/responses", "/v1/responses/*"], "authentication":{"required":false,"headers":{"authorization":["Bearer local-router"],"x-api-key":["local-router"]}}},
+      {"id": "messages-client", "authentication":{"required":true,"headers":{"authorization":["Bearer local-router"],"x-api-key":["local-router"]}}, "response_errors": {
         "request_headers": [{"name":"x-router-fast-control", "values":["client"]}],
         "status_map": {"429":503},
         "original_status_header": "x-router-upstream-status"
