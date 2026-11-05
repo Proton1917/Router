@@ -387,6 +387,10 @@ python3 scripts/log-maintenance.py run --config /path/to/router.json --report
 
 ## Codex
 
+“Codex 登录”启动方式用于跟随 Codex 本身的配置。本机 `cx` 使用该方式，读取现有用户配置、ChatGPT 登录和原生模型选择，连接共享本地服务。当前 HTTP 通信设置来自 Codex 用户配置中的 `openai_http` provider。新启动的会话可通过 `/agents` 或空输入框的左方向键打开 Agents 总览，`/status` 显示 `Local background server`。
+
+此模板的 `args` 保持为空，provider、登录方式与通信设置交由 Codex 保存的配置管理。Codex 0.166.0 中，`--no-daemon` 和命令行 `-c` 配置覆盖都会选择独立运行模式；Agents 总览使用共享服务。通过 Router 修改模板后，后续启动直接读取新配置，现有会话继续按各自启动模式运行。
+
 控制台的“启动命令 → 编辑命令与模型”中，支持切换登录方式的 Codex 模板提供“默认启动模式”和“账号配置与凭据目录”。默认使用 API；账号模式使用该目录下独立的配置、凭据和会话，模型及 Fast 由 Codex 原生菜单选择。切换模式会保留 API 模型列表。
 
 以 `cdx` 为例，可在终端临时选择模式并完成第二个账号登录：

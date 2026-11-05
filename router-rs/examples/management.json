@@ -89,9 +89,9 @@
     },
     "account-client": {
       "label": "Codex 登录",
-      "description": "使用客户端的 ChatGPT 登录凭据和原生模型。",
+      "description": "跟随 Codex 已保存的配置和 ChatGPT 登录，连接共享服务并使用原生模型与 Agents 总览。",
       "program": "codex",
-      "args": ["-c", "model_provider=\"openai\"", "-c", "forced_login_method=\"chatgpt\""],
+      "args": [],
       "model_flags": ["--model", "-m"],
       "unset_env": ["OPENAI_API_KEY", "OPENAI_BASE_URL"]
     }
