@@ -73,6 +73,8 @@ pub struct LaunchTemplate {
     #[serde(default)]
     pub model_adapter: Option<ProcessSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_adapter: Option<ProcessSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window_range: Option<crate::routing::TokenRange>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub compaction_routes: Vec<String>,
@@ -1021,6 +1023,49 @@ async fn launch_preview(
 }
 
 #[derive(Deserialize)]
+struct AccountAction {
+    name: String,
+    action: String,
+    account: Option<String>,
+    session: Option<String>,
+    revision: Option<String>,
+}
+
+async fn account_action(
+    State(state): State<ControlState>,
+    Json(request): Json<AccountAction>,
+) -> Result<Json<Value>, ApiError> {
+    use tokio::io::AsyncWriteExt;
+    let result: Result<Value> = async {
+    ensure!(["status", "login", "logout", "switch"].contains(&request.action.as_str()), "账号操作无效");
+    let config = load_value(&state.path)?;
+    if request.action != "status" {
+        ensure!(request.revision.as_deref() == Some(&revision(&config)?), "请应用账号配置后再执行登录操作");
+    }
+    let manager = management(&config)?;
+    let entry = manager.commands.get(&request.name).context("启动命令不存在")?;
+    let adapter = manager.templates[&entry.template].account_adapter.as_ref().context("此启动方式通过客户端管理账号")?;
+    let context = json!({"config_path":state.path.as_ref(),"config_directory":state.path.parent(),"command_name":request.name});
+    let mut process = tokio::process::Command::new(render(&adapter.program, &context)?);
+    for argument in &adapter.args { process.arg(render(argument, &context)?); }
+    let (environment, removed) = crate::cli::env_plan(&config, &request.name, false)?;
+    for key in removed { process.env_remove(key); }
+    process.envs(environment).env("ROUTER_CONFIG", state.path.as_ref()).env("ROUTER_COMMAND_NAME", &request.name);
+    process.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(true);
+    let mut child = process.spawn()?;
+    let input = json!({"action":request.action,"account":request.account,"session":request.session});
+    let operation = async move {
+        child.stdin.take().context("账号适配程序输入不可用")?.write_all(&serde_json::to_vec(&input)?).await?;
+        child.wait_with_output().await.map_err(anyhow::Error::from)
+    };
+    let output = tokio::time::timeout(std::time::Duration::from_secs(45), operation).await.context("账号操作超时，请检查官方客户端")??;
+    ensure!(output.status.success(), "账号操作失败：{}", String::from_utf8_lossy(&output.stderr));
+    serde_json::from_slice(&output.stdout).context("账号适配程序返回格式错误")
+    }.await;
+    Ok(Json(result?))
+}
+
+#[derive(Deserialize)]
 struct BackendProbe {
     id: String,
     path: String,
@@ -1110,6 +1155,7 @@ pub async fn bind(
         .route("/credentials", post(credential))
         .route("/commands/install", post(install))
         .route("/commands/preview", post(launch_preview))
+        .route("/accounts/action", post(account_action))
         .route("/backends/probe", post(backend_probe))
         .route("/models/context", post(model_context))
         .route("/integrations/action", post(integration_action))

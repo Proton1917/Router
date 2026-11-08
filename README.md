@@ -6,8 +6,11 @@ Router 是一个通过外部 JSON 配置的 Rust 模型路由服务，提供 Tau
 
 当前桌面安装包适用于 **Apple Silicon、macOS 14 及以上**，项目采用 [MIT 许可证](LICENSE)。
 
+v0.7.0 提供首次接入引导、应用组件更新和 Claude 主备账号管理。
+
 - [安装与首次打开](#安装与首次打开)
 - [第一次配置 API 和启动命令](#第一次配置-api-和启动命令)
+- [Claude 官方订阅主备账号](#claude-官方订阅主备账号)
 - [使用 OAuth 登录服务商](#使用-oauth-登录服务商)
 - [查看账号配额](docs/quotas.md)：Antigravity 分组额度、Grok 订阅额度与刷新设置。
 - [管理多个模型、Fast 和上下文](#管理多个模型fast-和上下文)
@@ -21,7 +24,7 @@ Router 是一个通过外部 JSON 配置的 Rust 模型路由服务，提供 Tau
 
 ### 准备需要的软件和账号
 
-桌面包包含 Router、网页、SPT 引擎和配置示例。按需要准备以下内容：
+桌面包包含 Router、网页、SPT 引擎和配置示例。首次引导会发现本机客户端及 Python 3；已安装 Homebrew 时，勾选自动安装即可补齐所选客户端与 Python。需要 Homebrew 时，可在引导中打开官方安装页，使用官方 `.pkg` 安装程序，完成后点击“刷新程序状态”接着配置。按启用功能准备以下内容：
 
 | 用途 | 需要准备 |
 | --- | --- |
@@ -42,7 +45,7 @@ brew install --cask Proton1917/tap/router
 open -a Router
 ```
 
-也可在 [v0.6.0 Release](https://github.com/Proton1917/Router/releases/tag/v0.6.0) 下载 `Router_0.6.0_aarch64.dmg`，打开后将 **Router.app** 拖入“应用程序”。
+也可在 [v0.7.0 Release](https://github.com/Proton1917/Router/releases/tag/v0.7.0) 下载 `Router_0.7.0_aarch64.dmg`，打开后将 **Router.app** 拖入“应用程序”。
 
 如需验证下载完整性，将安装包与同页的 `SHA256SUMS.txt` 放在同一目录，在该目录执行：
 
@@ -50,16 +53,18 @@ open -a Router
 shasum -a 256 --ignore-missing -c SHA256SUMS.txt
 ```
 
-确认输出 `Router_0.6.0_aarch64.dmg: OK`。校验文件也包含配套 SPT 源码包的记录，`--ignore-missing` 允许只下载桌面安装包。
+确认输出 `Router_0.7.0_aarch64.dmg: OK`。校验文件也包含配套 SPT 源码包的记录，`--ignore-missing` 允许只下载桌面安装包。
 
 当前应用采用 ad-hoc 签名，尚未经过 Apple 公证。首次打开受到 Gatekeeper 阻止时，确认下载来源后，在“系统设置 → 隐私与安全性”中允许打开。
 
 ### 创建本机配置
 
-1. 打开 Router，展开“创建新配置”。
-2. 确认以下四项。界面会自动填入当前用户的绝对路径；需要自定义时也填写绝对路径。
-3. 保持“自动配置 Zsh 终端入口”选中，点击“安装并打开控制台”。
-4. 重新打开终端，运行 `router status`，应看到 `gateway_online: true` 和当前配置文件路径。
+1. 打开 Router，选择 Claude Code 或 Codex。Claude Code 可选择官方订阅账号或 API Key；API 接入再选择服务商。已有本机配置会直接打开。
+2. 使用官方订阅时，设置主账号及可选备用账号；使用 API 时，填写 API Key 并点击“读取可用模型”。Anthropic、OpenAI、OpenRouter 和 DeepSeek 的地址与认证方式由引导填写；自定义兼容服务填写 API 基础地址。
+3. API 接入选择模型，然后确认终端命令名称，点击“创建并打开控制台”。模型目录读取失败时，页面保留具体错误，也支持填写服务商提供的完整模型 ID。
+4. 引导按选择准备程序，创建后台服务、模型绑定和命令，然后打开控制台。重新打开终端，输入刚创建的命令即可启动客户端。
+
+配置目录、终端目录和可用端口会自动填入“安装位置与高级设置”。高级设置也提供“创建空配置”入口，适合自行配置 OAuth 或其他接入方式。
 
 | 设置 | 默认位置或值 | 用途 |
 | --- | --- | --- |
@@ -68,7 +73,7 @@ shasum -a 256 --ignore-missing -c SHA256SUMS.txt
 | 转发监听地址 | `127.0.0.1:8080` | Claude Code、Codex 等客户端发送模型请求的地址 |
 | 控制台监听地址 | `127.0.0.1:8081` | 桌面窗口和网页使用的管理地址 |
 
-已有 `router.json` 时，点击“选择已有配置文件…”。创建新配置会检查配置文件、安装资源、终端入口和端口冲突；提示已有文件时，可选择原配置或更换安装目录。
+已有 `router.json` 时，点击“选择已有配置…”。引导会发现默认目录中的配置；创建新配置时会检查目录、终端入口和端口占用。API Key 保存在权限为 `0600` 的独立文件中，配置保存其路径。
 
 后续直接打开 Router 即可。执行 `router web` 会在浏览器中打开同一套控制台，默认使用 Safari。关闭窗口或退出桌面应用后，后台转发服务和已提交的转写任务继续运行。桌面窗口由 Tauri 提供，转发、管理 API 和网页由同一个 Rust 服务进程提供。
 
@@ -100,7 +105,7 @@ Router 默认把接口路径附加到基础地址后，例如 `/v1/messages`。�
 ### 2. 创建终端命令并选择模型
 
 1. 进入“启动命令”，点击“添加命令”。
-2. 命令名称填写 `mycc`，启动方式选择“Claude Code API”。
+2. 命令名称填写 `mycc`，启动方式选择“Claude Code · API / 账号”，接入方式选择“API”。
 3. 点击“添加模型”，将该条目的 API 后端设为 `messages`。右侧下拉框会读取该后端的完整模型目录，搜索并选择需要的模型；Router 自动创建模型绑定。
 4. 在“默认启动模型”中选择这个模型。可以填写该条目自己的显示名称，并保留“在客户端菜单显示”。
 5. 点击“保存草稿”。
@@ -114,6 +119,30 @@ Router 默认把接口路径附加到基础地址后，例如 `/v1/messages`。�
 3. 打开新终端，输入 `mycc`。在 Claude Code 中使用 `/model` 查看模型菜单，再发送一条普通消息验证真实调用。
 
 应用修改会自动同步 Zsh 命令，新增命令不需要逐个编辑 `.zshrc`。配置校验和“启动预览”检查配置与启动参数；真实调用还要求 API Key 有效、模型可用且账号额度充足。
+
+## Claude 官方订阅主备账号
+
+每个 Claude Code 命令都可在“编辑命令与模型 → 接入方式”中选择“API”或“账号”。API 模式使用该命令配置的服务和模型；账号模式管理该命令自己的主账号、备用账号及登录状态。两种设置分别保存，切换接入方式后在下次启动命令时生效。
+
+首次引导选择“Claude 官方订阅账号”即可填写账号名称并创建命令，默认命令名为 `cc`。勾选“主账号沿用本机 Claude Code 登录”时使用本机默认配置，其余账号各自使用独立目录。在账号下点击“官方登录”，由官方客户端打开浏览器并保存授权。登录状态显示账号邮箱及订阅类型，列表第一项为主账号。
+
+账号模式正常使用时固定主账号。Claude Code 通过 `StopFailure` 报告 `rate_limit` 后，启动器按备用顺序选择已登录的其他账号，再以原对话记录的绝对路径调用官方 `--resume`，继续处理当前请求。同一轮自动切换中每个账号尝试一次；所有可用账号都达到限额时，当前会话保留在官方客户端中等待恢复。
+
+运行中的交互会话会显示在该命令的账号面板。选定会话后点击“切换到此账号”，可手动切换到已登录账号；当前回复正在执行时，切换会在回复结束后进行，并恢复这段对话。“设为主账号”调整下一次启动时的优先账号。
+
+登录、续期与订阅推理由官方 Claude Code 执行。Router 保存账号目录、角色及切换状态，读取官方 `auth status --json` 返回的登录信息。macOS 默认账号沿用默认钥匙串项；独立目录通过 `CLAUDE_CONFIG_DIR` 选择各自的钥匙串项。将同一官方账号配置为多项时，自动切换按账号邮箱和组织识别同一身份。
+
+```sh
+cc
+cc --router-mode api
+cc --router-mode account
+cc --router-account backup
+cc --router-manage status
+```
+
+`--router-mode` 临时选择接入方式，`--router-account` 临时选择账号模式及优先账号；显式选中的账号处于待登录状态时，启动器提示登录该账号。`cc auth login --router-account backup` 可从命令内登录配置的备用账号。启动时可直接传入普通提示词，或使用 `--router-prompt`。状态输出中的 `run_id` 标识运行会话；`--router-manage switch --router-session <run_id> --router-account <账号标识>` 可从终端发起手动切换。
+
+账号自动接续使用本机交互终端、Hook 与持久化会话，接口依据 Claude Code 2.1.318。恢复保留对话、工具调用及已记录结果；后台 Bash 和监控任务在切换后需重新建立。切换时终端界面会短暂重启。原有状态栏继续显示，并追加当前账号名称。打印、后台及其他原生运行方式沿用官方客户端的执行行为。
 
 ## 使用 OAuth 登录服务商
 
@@ -133,6 +162,10 @@ Router 直接完成授权和令牌刷新，不需要 OpenCode。访问令牌、�
 Cherry Studio 等客户端可添加自定义提供商，Base URL 填写 Router 的转发地址，按后端支持的协议启用 Anthropic、OpenAI Chat Completions 或 Responses 端点。API Key 使用该 Router 客户端规则约定的本机标记；真实服务商凭据仍由 Router 管理。
 
 `runtime.clients[].catalog_commands` 可以列出要共享的启动命令，例如 `["cc","ccor","cdx"]`。请求匹配这个客户端后，`GET /v1/models` 返回这些命令的可见模型，模型 ID 为 `命令/模型名称`；同一 ID 的推理请求自动使用对应模型配置及其标准/Fast 目标。修改命令中的模型绑定后，目录和路由随配置更新。具体配置见 [OAuth 与客户端接入参考](docs/oauth.md#共享模型目录)。
+
+共享入口的目录和生成请求均携带配置的客户端认证标记。本机通用应用使用 `Authorization: Bearer router-local-client` 或 `x-api-key: router-local-client`，Messages Base URL 为 `http://127.0.0.1:43177/v1`，OAuth Gemini 使用完整 ID `cc/gemini-3.8-flash-high`。认证错误返回 401；共享目录范围外的模型返回 403。各部署通过 `runtime.clients[].authentication` 明确声明认证及匿名入口，详见上述接入参考。
+
+客户端可设置 `default_fast: true`，为省略速度字段的请求选择模型自身的 Fast 目标。显式速度字段优先，便于应用单独选择 Standard；其他客户端保留各自的速度配置。
 
 ## 管理多个模型、Fast 和上下文
 
@@ -193,7 +226,7 @@ cdx --router-mode account
 
 独立账号模式的首次登录会打开官方登录流程，在浏览器中选择要使用的账号。该模式通过独立 `CODEX_HOME` 保存配置、凭据和会话。API 模式使用 Router 凭据，独立账号模式使用其自己的登录信息。两套模型设置分别保存，切换模式后重新启动客户端。
 
-另一个“Codex 登录”启动方式直接使用客户端现有账号。模板和目录适配的具体字段见 [Codex 参考](docs/reference.md#codex)。
+另一个“Codex 登录”启动方式跟随客户端已保存的配置和 ChatGPT 账号，通过共享服务使用原生模型选择及 Agents 总览。本机 `cx` 采用此方式，`cdx` 使用上面的独立配置。模板和目录适配的具体字段见 [Codex 参考](docs/reference.md#codex)。
 
 ## 音频转写与图片识别
 
@@ -273,13 +306,11 @@ brew update
 brew upgrade --cask router
 ```
 
-手动安装用户可下载新版 DMG 并替换 Router.app。**后台程序、网页和脚本是首次安装时复制到配置目录的，升级 Router.app 后，还需更新这些已部署资源。**
+手动安装用户可下载新版 DMG 并替换 Router.app。打开新版应用后，桌面安装创建的配置会显示“更新 Router 组件”。结束使用 Router 的客户端会话，并完成或取消转写任务，然后点击“更新组件并打开”。
 
-1. 运行 `router status` 确认当前配置文件，查看其 `management.assets_directory` 及服务使用的可执行文件路径。
-2. 完成或取消当前转写任务，退出正在使用待更新启动脚本的客户端。
-3. 打开新版 `Router.app` 的“显示包内容”，进入 `Contents/Resources/resources/`。
-4. 按下表将新版资源复制到当前配置实际使用的位置。先将新版 `router` 复制为同目录临时文件并保留可执行权限，再重命名替换正式文件，避免直接覆盖运行中的程序。
-5. 运行 `router web --restart`，再重新启动需要更新菜单或启动参数的客户端。
+应用会一起更新后台程序、网页、SPT 和适配脚本，检查配置，再重启服务。API 凭据、模型配置、转写处理参数和已有结果保留。服务启动失败时恢复原有组件并显示错误。“稍后更新，打开控制台”可继续管理当前任务。
+
+运行资源默认部署位置如下；自定义命令行部署按实际配置维护。
 
 | 包内资源 | 桌面默认部署位置，相对于配置目录 |
 | --- | --- |

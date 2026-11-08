@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::{Context, Result, bail};
 use http::HeaderMap;
@@ -141,6 +141,11 @@ impl HeaderPredicate {
 pub struct ClientConfig {
     pub id: String,
     #[serde(default)]
+    pub authentication: Option<ClientAuthentication>,
+    /// 请求省略速度字段时采用此客户端的 Fast 默认值。
+    #[serde(default)]
+    pub default_fast: bool,
+    #[serde(default)]
     pub catalog_commands: Vec<String>,
     #[serde(default)]
     pub paths: Vec<String>,
@@ -156,6 +161,53 @@ pub struct ClientConfig {
     pub response_errors: Option<ResponseErrorPolicy>,
     #[serde(default, rename = "message_compatibility", alias = "word_gateway")]
     pub word_gateway: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClientAuthentication {
+    pub required: bool,
+    pub headers: BTreeMap<String, Vec<String>>,
+}
+
+#[derive(Debug)]
+pub enum ClientAccessError {
+    Authentication,
+    Model,
+}
+
+impl std::fmt::Display for ClientAccessError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Authentication => {
+                "Provide an accepted client authentication marker for this endpoint."
+            }
+            Self::Model => "Choose a model from this client's model catalog.",
+        })
+    }
+}
+
+impl std::error::Error for ClientAccessError {}
+
+impl ClientAuthentication {
+    fn authorize(&self, headers: &HeaderMap) -> Result<()> {
+        let mut present = false;
+        for (name, accepted) in &self.headers {
+            for value in headers.get_all(name) {
+                present = true;
+                if !accepted
+                    .iter()
+                    .any(|allowed| value.as_bytes() == allowed.as_bytes())
+                {
+                    return Err(ClientAccessError::Authentication.into());
+                }
+            }
+        }
+        if self.required && !present {
+            return Err(ClientAccessError::Authentication.into());
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -419,10 +471,15 @@ impl RuntimeConfig {
     }
 
     pub fn client_for(&self, headers: &HeaderMap, path: &str) -> Result<&ClientConfig> {
-        self.clients
+        let client = self
+            .clients
             .iter()
             .find(|client| client.matches(headers, path))
-            .context("no client matched")
+            .context("no client matched")?;
+        if let Some(authentication) = &client.authentication {
+            authentication.authorize(headers)?;
+        }
+        Ok(client)
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -521,6 +578,20 @@ impl RuntimeConfig {
         let mut ids = HashSet::new();
         for (index, client) in self.clients.iter().enumerate() {
             validate_id(&client.id)?;
+            if let Some(authentication) = &client.authentication {
+                if authentication.headers.is_empty() {
+                    bail!("client authentication requires accepted headers");
+                }
+                for (name, values) in &authentication.headers {
+                    validate_header(name)?;
+                    if values.is_empty() || values.iter().any(String::is_empty) {
+                        bail!("client authentication requires nonempty accepted values");
+                    }
+                    for value in values {
+                        validate_header_value(value)?;
+                    }
+                }
+            }
             if client
                 .paths
                 .iter()

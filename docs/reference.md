@@ -7,12 +7,12 @@
 取得源码后，在项目根目录执行。需要 macOS 14+、Xcode Command Line Tools、Rust stable（Tauri 2.12 要求至少 Rust 1.90）、Node.js 20.19+ 或 22.12+、npm 和 Pixi。依赖由 Cargo、npm 和 Pixi 锁文件固定。
 
 ```sh
-git clone --branch v0.6.0 https://github.com/Proton1917/Router.git
+git clone --branch v0.7.0 https://github.com/Proton1917/Router.git
 cd Router
 npm ci --prefix desktop
 # 下载本版本配套的 SPT worker 源码，并构建其 release 程序。
 mkdir -p .work/spt-source
-curl -fL https://github.com/Proton1917/Router/releases/download/v0.6.0/spt-worker-6f5af7f.tar.gz -o .work/spt-worker.tar.gz
+curl -fL https://github.com/Proton1917/Router/releases/download/v0.7.0/spt-worker-6f5af7f.tar.gz -o .work/spt-worker.tar.gz
 tar -xzf .work/spt-worker.tar.gz -C .work/spt-source --strip-components=1
 RUSTFLAGS="--remap-path-prefix=$HOME=/build-home --remap-path-prefix=$PWD=/router" \
   cargo build --release --locked --manifest-path .work/spt-source/Cargo.toml
@@ -133,6 +133,8 @@ router config check
 `runtime.selection.speed_pointer` 和 `fast_value` 定义主要速度字段。`speed_sources` 按顺序声明其他来源，每项包含 `pointer`、`fast_values` 和可选的客户端 `contexts`。主要字段中的显式值优先；主要字段缺失时，读取第一个适用于当前客户端且包含字符串值的来源。该值在 `fast_values` 中时选择此模型的 Fast 目标，其他字符串值选择标准目标；全部来源缺失时沿用该路由的设置规则。示例把 Responses 客户端的 `/service_tier` 中 `priority`、`fast` 和 `ultrafast` 映射为 Fast，字段与取值均由配置定义。
 
 运行 `python3 scripts/check-speed-sources.py /absolute/path/to/router.json <command>` 可向当前命令的真实接口发送路由预览请求，检查配置来源、标准选择和主要速度字段的优先顺序。该检查依赖 `requests`，不发送上游生成请求。
+
+`runtime.clients[].default_fast` 为匹配的客户端设置默认速度，缺省值为 `false`。请求省略全部适用速度字段时，`true` 选择该模型的 Fast 目标；显式速度字段优先，`speed: "standard"` 选择标准目标。此默认值也适用于 `catalog_commands` 生成的共享目录入口。模型的 Fast 目标缺省时复用标准目标。
 
 Fast 是选择快速目标的客户端开关。快速目标可以指定独立 API 模型、后端、供应商和上游服务等级；命令编辑器的摘要显示其实际供应商。`validation_cases[].request_fields` 可按 JSON Pointer 设置额外请求字段，用于校验这些速度来源及其优先顺序。
 
@@ -273,6 +275,8 @@ python3 -m venv "$HOME/.config/router/python"
 | `catalog` | 可选模型目录、模型元数据及 Messages 兼容参数 |
 | `validation_cases` | 配置加载时执行的路由断言 |
 
+客户端认证通过 `runtime.clients[].authentication` 声明：`required` 指定认证头是否必填，`headers` 将请求头名称映射为接受值数组。选定客户端后先校验认证，再处理模型目录或生成请求。必填值缺失、值错误或多种认证头冲突时返回 HTTP 401 与 `authentication_error`；`required: false` 的入口接受省略认证，已提供的值继续按表校验。最终客户端应结合其访问契约声明认证策略，路径和普通请求头匹配条件负责客户端选择。完整共享目录配置见 [共享模型目录](oauth.md#共享模型目录)。
+
 路由、客户端、模型、供应商、凭据文件、接口映射和处理策略在每次请求时重新读取。监听地址、健康检查路径、HTTP 超时及正文处理资源配置的变更需要重新启动服务。以上配置变更均不需要重新编译。
 
 Rust 实现配置校验、规则执行、HTTP 传输和协议编解码。增加现有配置能够表达的后端或客户端，只需修改 JSON；增加新的协议编解码能力时需要修改对应实现。
@@ -316,6 +320,18 @@ Rust 实现配置校验、规则执行、HTTP 传输和协议编解码。增加�
 `{provider}` 取自所选 profile 或该 profile 允许的请求头覆盖。`field_policy` 支持字段保留、删除、重命名、赋值、空值处理和指定文本行替换；`header_policy` 支持请求头过滤及固定字段。接入新后端时按其实际协议配置这些规则。
 
 ## Claude Code
+
+### 官方订阅账号适配
+
+Claude Code 启动模板复用 `scripts/claude-subscription.py`，通过 `options.auth-mode` 选择 `api` 或 `account`。`api_gate` 读取启动器确定的 `ROUTER_CLAUDE_MODE`，API 环境、模型菜单和上下文设置在 API 分支应用。已有机器专用启动器通过 `ROUTER_CLAUDE_API_LAUNCHER` 引用；直接 API 启动通过 Router 的 `__exec` 完成。
+
+每个命令的 `env.ROUTER_SUBSCRIPTION_ACCOUNTS` 保存独立 JSON 数组，每项包含 `id`、`label`、`directory`，第一项为主账号。`ROUTER_SUBSCRIPTION_CLIENT` 指定官方客户端，`ROUTER_SUBSCRIPTION_RESUME_PROMPT` 保存接续提示。默认配置目录使用官方默认登录；其他目录通过 `CLAUDE_CONFIG_DIR` 隔离登录。
+
+启动器通过临时设置添加 `SessionStart`、`UserPromptSubmit`、`Stop`、`StopFailure` Hook 和账号状态栏。Hook 向本次进程的本机监听端口发送结构化事件，并使用随机会话标记验证来源。控制凭据保存在配置声明的凭据目录，退出后清理。原有状态栏继续接收原始数据。限额事件触发备用选择，手动切换在当前回复结束后执行，随后使用官方 `--resume` 载入记录。运行与切换记录位于 `client-state/subscriptions/<命令>/`。
+
+`scripts/claude-cli-options.json` 声明当前客户端的参数结构，由标准库 `argparse` 分离启动提示词及会话恢复参数，其他选项继续传递给官方客户端。`--router-account` 临时选择账号，`--router-manage status` 查询状态，`--router-manage switch` 配合 `--router-session` 指定正在运行的会话。
+
+启动模板的 `account_adapter` 使用现有 `ProcessSpec`。`POST /api/accounts/action` 接收 `name`、`action`、可选 `account`、`session`；变更操作同时传入配置 `revision`。操作为 `status`、`login`、`logout`、`switch`。适配程序从标准输入读取 JSON，继承命令环境及 `ROUTER_CONFIG`、`ROUTER_COMMAND_NAME`，在 45 秒内返回结果。官方浏览器登录由独立客户端流程执行，手动切换通过受保护的本机会话控制通道提交。
 
 将 Claude Code 的 API 地址指向 router，并选择后端实际支持的模型：
 
@@ -382,6 +398,10 @@ python3 scripts/log-maintenance.py run --config /path/to/router.json --report
 维护任务名称为原服务名称加 `.logs`，使用当前用户的 launchd 会话调度。维护错误写入同一目录的 `log-maintenance.log`，该文件也受同一策略限制。
 
 ## Codex
+
+“Codex 登录”启动方式用于跟随 Codex 本身的配置。本机 `cx` 使用该方式，读取现有用户配置、ChatGPT 登录和原生模型选择，连接共享本地服务。当前 HTTP 通信设置来自 Codex 用户配置中的 `openai_http` provider。新启动的会话可通过 `/agents` 或空输入框的左方向键打开 Agents 总览，`/status` 显示 `Local background server`。
+
+此模板的 `args` 保持为空，provider、登录方式与通信设置交由 Codex 保存的配置管理。Codex 0.166.0 中，`--no-daemon` 和命令行 `-c` 配置覆盖都会选择独立运行模式；Agents 总览使用共享服务。通过 Router 修改模板后，后续启动直接读取新配置，现有会话继续按各自启动模式运行。
 
 控制台的“启动命令 → 编辑命令与模型”中，支持切换登录方式的 Codex 模板提供“默认启动模式”和“账号配置与凭据目录”。默认使用 API；账号模式使用该目录下独立的配置、凭据和会话，模型及 Fast 由 Codex 原生菜单选择。切换模式会保留 API 模型列表。
 

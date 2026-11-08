@@ -1,0 +1,10 @@
+{
+  "client_version": "2.1.318",
+  "commands": ["agents","attach","auth","auto-mode","doctor","gateway","import","install","logs","mcp","plugin","plugins","purge","respawn","rm","setup-token","stop","kill","ultrareview","update","upgrade"],
+  "direct_flags": ["--bare","--safe-mode","-p","--print","--no-session-persistence","--bg","--background","--desktop","--cloud","--tmux"],
+  "zero": [["--allow-dangerously-skip-permissions"],["--ax-screen-reader"],["--brief"],["--chrome"],["-c","--continue"],["--dangerously-skip-permissions"],["--disable-slash-commands"],["--exclude-dynamic-system-prompt-sections"],["--fork-session"],["--forward-subagent-text"],["--ide"],["--include-hook-events"],["--include-partial-messages"],["--no-chrome"],["--replay-user-messages"],["--restricted"],["--strict-mcp-config"],["--verbose"]],
+  "one": [["--agent"],["--agents"],["--append-system-prompt"],["--append-system-prompt-file"],["--autocompact"],["--debug-file"],["--effort"],["--environment"],["--fallback-model"],["--input-format"],["--json-schema"],["--max-budget-usd"],["--model"],["-n","--name"],["--output-format"],["--permission-mode"],["--permission-prompts"],["--plugin-dir"],["--plugin-url"],["--remote-control-session-name-prefix"],["--session-id"],["--setting-sources"],["--system-prompt"],["--system-prompt-file"],["--system-prompt-snapshot"]],
+  "optional": [["-d","--debug"],["--from-pr"],["--prompt-suggestions"],["--remote-control"],["-r","--resume"],["--teleport"],["-w","--worktree"]],
+  "many": [["--add-dir"],["--allowedTools","--allowed-tools"],["--betas"],["--disallowedTools","--disallowed-tools"],["--file"],["--mcp-config"],["--tools"]],
+  "resume_remove": ["--resume","-r","--continue","-c","--session-id","--fork-session","--from-pr","--worktree","-w"]
+}

@@ -12,9 +12,12 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tauri::{
-    AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
 };
+
+mod deployment;
+mod onboarding;
 
 #[derive(Parser)]
 struct Arguments {
@@ -28,6 +31,10 @@ struct Arguments {
 struct DesktopState {
     error: Mutex<Option<String>>,
     operation: tokio::sync::Mutex<()>,
+    explicit_config: Option<PathBuf>,
+    pending_update: Mutex<Option<PathBuf>>,
+    pending_installation: Mutex<Option<(InstallLocation, PathBuf)>>,
+    initial_command: Mutex<Option<String>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -44,9 +51,13 @@ fn preferences_path(app: &AppHandle) -> Result<PathBuf> {
 }
 
 fn saved_config(app: &AppHandle) -> Result<Option<PathBuf>> {
+    if let Some(path) = &app.state::<DesktopState>().explicit_config {
+        return Ok(path.exists().then(|| path.clone()));
+    }
     let path = preferences_path(app)?;
     if !path.exists() {
-        return Ok(None);
+        let config = app.path().home_dir()?.join(".config/router/router.json");
+        return Ok(config.exists().then_some(config));
     }
     let preferences: Preferences = serde_json::from_slice(&fs::read(path)?)?;
     Ok(Some(preferences.config))
@@ -144,9 +155,20 @@ fn report(app: &AppHandle, error: anyhow::Error) {
 
 async fn connect(app: &AppHandle, config: &Path) -> Result<()> {
     let config = fs::canonicalize(config).context("配置文件不存在")?;
+    if deployment::needs_update(app, &config)? {
+        *app.state::<DesktopState>()
+            .pending_update
+            .lock()
+            .expect("更新状态不可用") = Some(config);
+        return show_setup(app);
+    }
+    open_connection(app, &config).await
+}
+
+async fn open_connection(app: &AppHandle, config: &Path) -> Result<()> {
     let binary = resources(app)?.join("router");
-    run_router(&binary, &config, &["web", "--no-open"]).await?;
-    let value: Value = serde_json::from_slice(&fs::read(&config)?)?;
+    run_router(&binary, config, &["web", "--no-open"]).await?;
+    let value: Value = serde_json::from_slice(&fs::read(config)?)?;
     let address: SocketAddr = value["management"]["listen"]
         .as_str()
         .context("配置缺少网页监听地址")?
@@ -168,6 +190,15 @@ async fn connect(app: &AppHandle, config: &Path) -> Result<()> {
         "desktop_version={}",
         env!("CARGO_PKG_VERSION")
     )));
+    if let Some(command) = app
+        .state::<DesktopState>()
+        .initial_command
+        .lock()
+        .expect("初始命令状态不可用")
+        .take()
+    {
+        url.query_pairs_mut().append_pair("setup_command", &command);
+    }
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
         .build()?;
@@ -186,10 +217,10 @@ async fn connect(app: &AppHandle, config: &Path) -> Result<()> {
     let origin = url.origin();
     let mut authenticated = url;
     authenticated.set_fragment(Some(&format!("desktop=1&token={}", token.trim())));
-    let label = console_label(&config);
+    let label = console_label(config);
     let mut appearance = window_config(
         app,
-        Some(&config),
+        Some(config),
         "console",
         WebviewUrl::External(authenticated),
     )?;
@@ -208,7 +239,14 @@ async fn connect(app: &AppHandle, config: &Path) -> Result<()> {
             window.close()?;
         }
     }
-    write_json(&preferences_path(app)?, &Preferences { config })?;
+    if app.state::<DesktopState>().explicit_config.is_none() {
+        write_json(
+            &preferences_path(app)?,
+            &Preferences {
+                config: config.to_owned(),
+            },
+        )?;
+    }
     if let Some(window) = app.get_webview_window("setup") {
         window.close()?;
     }
@@ -224,12 +262,19 @@ fn setup_info(app: AppHandle, window: WebviewWindow) -> Result<Value, String> {
         let management: Value = serde_json::from_slice(&fs::read(
             resources(&app)?.join("examples/management.json"),
         )?)?;
+        let recipes = onboarding::recipes(&app)?;
+        let directory = app.state::<DesktopState>().explicit_config.as_ref().and_then(|path| path.parent().map(Path::to_owned)).unwrap_or(app.path().home_dir()?.join(".config/router"));
+        let (gateway, control) = onboarding::available_addresses(example["runtime"]["server"]["listen"].as_str().context("示例缺少转发地址")?, management["listen"].as_str().context("示例缺少控制台地址")?)?;
         Ok(json!({
-            "directory": app.path().home_dir()?.join(".config/router"),
+            "directory": directory,
             "launchers": app.path().home_dir()?.join(".local/bin"),
-            "gateway": example["runtime"]["server"]["listen"],
-            "control": management["listen"],
+            "gateway": gateway,
+            "control": control,
+            "environment": onboarding::environment(&app, &recipes)?,
+            "default_account_directory": app.path().home_dir()?.join(".claude"),
+            "recipes": recipes,
             "saved": saved_config(&app)?.is_some(),
+            "update": app.state::<DesktopState>().pending_update.lock().expect("更新状态不可用").clone(),
             "error": app.state::<DesktopState>().error.lock().expect("桌面错误状态不可用").take(),
         }))
     })()
@@ -262,7 +307,12 @@ async fn open_saved(app: AppHandle, window: WebviewWindow) -> Result<(), String>
         setup_guard(&window)?;
         let state = app.state::<DesktopState>();
         let _guard = state.operation.lock().await;
-        connect(&app, &saved_config(&app)?.context("尚未选择配置")?).await
+        let pending = state.pending_update.lock().expect("更新状态不可用").clone();
+        if let Some(config) = pending {
+            open_connection(&app, &config).await
+        } else {
+            connect(&app, &saved_config(&app)?.context("尚未选择配置")?).await
+        }
     }
     .await
     .map_err(|error| format!("{error:#}"))
@@ -325,12 +375,21 @@ fn initialize(
     fs::create_dir_all(directory)?;
     fs::set_permissions(directory, fs::Permissions::from_mode(0o700))?;
     let directory = fs::canonicalize(directory)?;
+    ensure!(
+        directory
+            .ancestors()
+            .all(|parent| !parent.join(".git").exists()),
+        "配置和凭据目录请放在 Git 工作区之外"
+    );
     let installation = directory.join("application");
     fs::create_dir_all(installation.join("bin"))?;
     fs::copy(source.join("router"), installation.join("bin/router"))?;
     fs::copy(source.join("spt-core"), installation.join("bin/spt-core"))?;
     fs::copy(source.join("SPT-LICENSE"), installation.join("SPT-LICENSE"))?;
-    copy_directory(&source.join("spt-licenses"), &installation.join("spt-licenses"))?;
+    copy_directory(
+        &source.join("spt-licenses"),
+        &installation.join("spt-licenses"),
+    )?;
     fs::create_dir_all(installation.join("examples"))?;
     fs::copy(
         source.join("examples/spt-engine.toml"),
@@ -345,10 +404,15 @@ fn initialize(
         source.join("appearance.json"),
         directory.join("desktop.json"),
     )?;
+    fs::copy(
+        source.join("installation.json"),
+        installation.join("installation.json"),
+    )?;
     let mut value: Value = serde_json::from_slice(&fs::read(source.join("examples/router.json"))?)?;
     let mut management: Value =
         serde_json::from_slice(&fs::read(source.join("examples/management.json"))?)?;
     value["runtime"]["server"]["listen"] = json!(gateway.to_string());
+    value["runtime"]["server"]["body_processing"]["spool_directory"] = json!("runtime/spool");
     management["listen"] = json!(control.to_string());
     management["assets_directory"] = json!(installation.join("web"));
     management["launcher_directory"] = json!(launchers);
@@ -369,42 +433,102 @@ fn initialize(
     value["management"] = management;
     write_json(&config, &value)?;
     fs::create_dir_all(directory.join("logs"))?;
-    let service = json!({"Label": label, "ProgramArguments": ["/usr/bin/env", "-u", "ROUTER_ADDR", installation.join("bin/router"), "--config", config, "serve"], "RunAtLoad": true, "KeepAlive": true, "StandardOutPath": directory.join("logs/gateway.log"), "StandardErrorPath": directory.join("logs/gateway.log")});
+    let service = json!({"Label": label, "ProgramArguments": ["/usr/bin/env", "-u", "ROUTER_ADDR", installation.join("bin/router"), "--config", config, "serve"], "EnvironmentVariables":{"PATH":"/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"}, "RunAtLoad": true, "KeepAlive": true, "StandardOutPath": directory.join("logs/gateway.log"), "StandardErrorPath": directory.join("logs/gateway.log")});
     plist::to_file_xml(&service_file, &service)?;
     drop((gateway_socket, control_socket));
     Ok(config)
+}
+
+#[derive(Deserialize)]
+struct InstallRequest {
+    directory: String,
+    launchers: String,
+    gateway: String,
+    control: String,
+    shell: bool,
+    selection: Option<onboarding::Selection>,
+}
+
+#[derive(Clone, PartialEq)]
+struct InstallLocation {
+    directory: String,
+    launchers: String,
+    gateway: String,
+    control: String,
 }
 
 #[tauri::command]
 async fn create_config(
     app: AppHandle,
     window: WebviewWindow,
-    directory: String,
-    launchers: String,
-    gateway: String,
-    control: String,
-    shell: bool,
+    request: InstallRequest,
 ) -> Result<(), String> {
     async {
         setup_guard(&window)?;
+        let InstallRequest {
+            directory,
+            launchers,
+            gateway,
+            control,
+            shell,
+            selection,
+        } = request;
         let state = app.state::<DesktopState>();
         let _guard = state.operation.lock().await;
-        let installer_app = app.clone();
-        let config = tauri::async_runtime::spawn_blocking(move || {
-            initialize(
-                &installer_app,
-                Path::new(&directory),
-                Path::new(&launchers),
-                &gateway,
-                &control,
-            )
-        })
-        .await??;
+        let programs = match &selection {
+            Some(selection) => Some(onboarding::dependencies(&app, selection).await?),
+            None => None,
+        };
+        app.emit("setup-progress", "正在创建服务、模型与终端命令…")?;
+        let location = InstallLocation {
+            directory,
+            launchers,
+            gateway,
+            control,
+        };
+        let pending = state
+            .pending_installation
+            .lock()
+            .expect("安装状态不可用")
+            .clone();
+        let config = if let Some((installed, config)) = pending {
+            ensure!(
+                installed == location,
+                "当前安装已创建，请保留原安装目录和端口继续配置，或重新打开引导选择已有配置"
+            );
+            config
+        } else {
+            let installer_app = app.clone();
+            let installation_location = location.clone();
+            let config = tauri::async_runtime::spawn_blocking(move || {
+                initialize(
+                    &installer_app,
+                    Path::new(&installation_location.directory),
+                    Path::new(&installation_location.launchers),
+                    &installation_location.gateway,
+                    &installation_location.control,
+                )
+            })
+            .await??;
+            *state.pending_installation.lock().expect("安装状态不可用") =
+                Some((location, config.clone()));
+            config
+        };
         let binary = config
             .parent()
             .context("安装目录不存在")?
             .join("application/bin/router");
-        run_router(&binary, &config, &["config", "check"]).await?;
+        if let (Some(selection), Some(programs)) = (&selection, &programs) {
+            onboarding::configure(&app, &config, selection, programs).await?;
+            if selection.authentication == "subscription" {
+                *app.state::<DesktopState>()
+                    .initial_command
+                    .lock()
+                    .expect("初始命令状态不可用") = Some(selection.command.clone());
+            }
+        } else {
+            run_router(&binary, &config, &["config", "check"]).await?;
+        }
         let result: Value =
             serde_json::from_slice(&run_router(&binary, &config, &["commands", "install"]).await?)?;
         if shell {
@@ -442,6 +566,62 @@ async fn create_config(
                     .write_all(line.as_bytes())?;
             }
         }
+        connect(&app, &config).await?;
+        *state.pending_installation.lock().expect("安装状态不可用") = None;
+        Ok(())
+    }
+    .await
+    .map_err(|error| format!("{error:#}"))
+}
+
+#[tauri::command]
+async fn dependency_help(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
+    async {
+        setup_guard(&window)?;
+        let recipes = onboarding::recipes(&app)?;
+        let url = recipes["dependency_help_url"]
+            .as_str()
+            .context("依赖安装地址缺失")?;
+        let status = tokio::process::Command::new("/usr/bin/open")
+            .arg(url)
+            .status()
+            .await?;
+        ensure!(status.success(), "请在浏览器打开 Homebrew 官方安装页面");
+        Ok::<(), anyhow::Error>(())
+    }
+    .await
+    .map_err(|error| format!("{error:#}"))
+}
+
+#[tauri::command]
+async fn setup_models(
+    app: AppHandle,
+    window: WebviewWindow,
+    selection: onboarding::Selection,
+) -> Result<Value, String> {
+    async {
+        setup_guard(&window)?;
+        onboarding::models(&app, &selection).await
+    }
+    .await
+    .map_err(|error| format!("{error:#}"))
+}
+
+#[tauri::command]
+async fn update_installation(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
+    async {
+        setup_guard(&window)?;
+        let state = app.state::<DesktopState>();
+        let _guard = state.operation.lock().await;
+        let config = state
+            .pending_update
+            .lock()
+            .expect("更新状态不可用")
+            .clone()
+            .context("请选择要更新的配置")?;
+        app.emit("setup-progress", "正在更新应用组件并重启服务…")?;
+        deployment::update(&app, &config).await?;
+        *state.pending_update.lock().expect("更新状态不可用") = None;
         connect(&app, &config).await
     }
     .await
@@ -450,13 +630,20 @@ async fn create_config(
 
 fn main() {
     let arguments = Arguments::parse();
+    let state = DesktopState {
+        explicit_config: arguments.config.clone(),
+        ..Default::default()
+    };
     let application = tauri::Builder::default()
-        .manage(DesktopState::default())
+        .manage(state)
         .invoke_handler(tauri::generate_handler![
             setup_info,
             choose_config,
             create_config,
-            open_saved
+            open_saved,
+            setup_models,
+            dependency_help,
+            update_installation
         ])
         .setup(move |app| {
             let handle = app.handle();

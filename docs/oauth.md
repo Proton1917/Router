@@ -63,6 +63,13 @@ Router 原子写入权限为 `0600` 的凭据文件，目录权限为 `0700`，�
 ```json
 {
   "id": "desktop-chat",
+  "authentication": {
+    "required": true,
+    "headers": {
+      "authorization": ["Bearer router-local-client"],
+      "x-api-key": ["router-local-client"]
+    }
+  },
   "any_headers": [
     {"name":"authorization","values":["Bearer router-local-client"]},
     {"name":"x-api-key","values":["router-local-client"]}
@@ -71,7 +78,36 @@ Router 原子写入权限为 `0600` 的凭据文件，目录权限为 `0700`，�
 }
 ```
 
-命令名称须已存在。`router-local-client` 是本机客户端匹配标记，不是上游密钥；此配置供回环地址上的客户端使用。客户端 Base URL 填写实际转发地址，API Key 填写该标记。模型目录返回 `mycc/模型名称` 等独立 ID，并自动生成仅适用于此客户端的路由。目录名称取模型条目显示名称或目标模型名称，目标、供应商、Fast 和字段策略复用原模型配置。
+命令名称须已存在。`router-local-client` 是回环接口的共享客户端标记，上游认证由 Router 的后端凭据配置提供。客户端 Base URL 填写实际转发地址，API Key 填写该标记。模型目录返回 `mycc/模型名称` 等独立 ID，并生成属于此客户端的路由。目录名称取模型条目显示名称或目标模型名称，目标、供应商、Fast 和字段策略复用原模型配置。
+
+客户端选择条件与认证条件分开配置。`any_headers` 等条件决定客户端身份，`authentication` 校验选中入口的认证头。最终默认客户端同样声明自己的认证要求，使错误共享标记得到明确的 401 响应。`authentication.required: false` 表示该入口接受省略认证头；已提交的认证头仍按配置校验。省略整个 `authentication` 字段的既有入口沿用其匿名访问行为。
+
+`authentication.headers` 中的值按完整字节匹配，HTTP 请求头名称按 HTTP 规则处理。提交任意一种接受的认证头即可；同时提交多种或重复认证头时，每个值都须符合该入口配置。模型目录与 Messages、Responses、Chat Completions 请求共用这项检查。浏览器的 OPTIONS 预检由 CORS 规则处理。
+
+共享目录由 `catalog_commands` 声明的命令生成，查询过程直接读取本机模型绑定。生成请求使用目录中的完整命名空间模型 ID，兼容名称按绑定配置接受。提交目录范围外的模型时返回 HTTP 403，错误类型为 `permission_error`。
+
+目录条目的 `capabilities` 携带本机上游目录已知的模型能力，例如 `["image", "text"]`；字段缺省表示未知。标准、Fast 和可切换思考档位取共同能力，来源及同步语义见[模型目录同步](model-catalogs.md#共享目录的模型能力)。应用侧持久化的模型输入类型由应用自身同步此信息。
+
+### 本机通用应用接入
+
+| 参数 | 当前本机约定 |
+| --- | --- |
+| Messages Base URL | `http://127.0.0.1:43177/v1` |
+| 推荐认证头 | `Authorization: Bearer router-local-client` |
+| 等价认证头 | `x-api-key: router-local-client` |
+| 目录请求 | `GET /v1/models`，兼容 `GET /models`；携带同一认证标记 |
+| 生成请求 | `POST /v1/messages` |
+| OAuth Gemini 模型 ID | `cc/gemini-3.8-flash-high` |
+
+本机共享标记对应 `runtime.clients` 中的共享目录入口。该目录反映当前 `catalog_commands` 的全部可见模型，应用按自身获准范围选择调用模型。目录响应成功表示共享入口认证成功；指定模型的调用结果通过该模型的请求确认。
+
+HTTP 401 的响应正文为：
+
+```json
+{"type":"error","error":{"type":"authentication_error","message":"Provide an accepted client authentication marker for this endpoint."}}
+```
+
+认证拒绝发生在本机目录返回、正文接收及上游转发之前。标准配置的认证值、客户端选择条件和匿名入口由 JSON 管理。
 
 客户端须按模型后端实际支持的协议发送请求。填写多个端点不会自动把任意 Messages、Responses、Chat Completions 互相转换。尚未配置独立 Fast 目标的模型继续使用其标准目标。
 
