@@ -23,7 +23,7 @@ if (launchParameters.get('desktop') === '1') sessionStorage.setItem('router-desk
 const desktop = sessionStorage.getItem('router-desktop') === '1';
 if (desktop) document.documentElement.dataset.desktop = 'true';
 const tokenFromUrl = launchParameters.get('token');
-if (tokenFromUrl) { sessionStorage.setItem('router-token', tokenFromUrl); history.replaceState(null, '', location.pathname); }
+if (tokenFromUrl) { sessionStorage.setItem('router-token', tokenFromUrl); history.replaceState(null, '', location.pathname + location.search); }
 
 async function api(path, body) {
   const response = await fetch(`/api/${path}`, { method: body === undefined ? 'GET' : 'POST', headers: { Authorization: `Bearer ${sessionStorage.getItem('router-token') || ''}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -113,7 +113,11 @@ function App() {
   const notify = (message, error = false) => setNotice({ message, error });
 
   function acceptConfig(data) { setSnapshot(data); setDraft(copy(data.config)); setStatus(data.status); setFatal(''); setPendingConfig(null); }
-  async function load() { const data = await api('state'); acceptConfig(data); }
+  async function load() {
+    const data = await api('state'); acceptConfig(data);
+    const initial = new URLSearchParams(location.search).get('setup_command');
+    if (!snapshot && initial && data.config.management.commands[initial]) setEditor({kind:'commands',id:initial,value:copy(data.config.management.commands[initial])});
+  }
   useEffect(() => { load().catch(e => setFatal(e.message)); }, []);
   useEffect(() => { if (!notice) return; const id = setTimeout(() => setNotice(null), 7000); return () => clearTimeout(id); }, [notice]);
   useEffect(() => {
@@ -300,7 +304,7 @@ function App() {
     </main>
     {!settingsSection && <button className="settings-trigger" aria-label="打开设置" title="设置" onClick={()=>{setSettingsSection('settings');setQuery('');}}><Icon name="settings" size={20}/><span>设置</span></button>}
     {notice && <div className={`toast ${notice.error ? 'toast-error' : ''}`} role="status"><Icon name={notice.error ? 'close' : 'check'}/><span>{notice.message}</span><button onClick={() => setNotice(null)} aria-label="关闭通知">×</button></div>}
-    {editor?.kind === 'commands' && <CommandEditor key={`commands:${editor.id}`} editor={editor} config={draft} close={() => setEditor(null)} ui={{Button,Field,Modal,JsonField}} api={api} workspace={setSection} save={(id,value,extras) => saveRecord('commands',editor.id,id,value,extras)}/>}
+    {editor?.kind === 'commands' && <CommandEditor key={`commands:${editor.id}`} editor={editor} config={draft} appliedConfig={snapshot.config} revision={snapshot.revision} configPath={status.config_path} close={() => setEditor(null)} ui={{Button,Field,Modal,JsonField}} api={api} workspace={setSection} save={(id,value,extras) => saveRecord('commands',editor.id,id,value,extras)}/>}
     {editor && editor.kind !== 'commands' && <Editor key={`${editor.kind}:${editor.id}`} editor={editor} config={draft} appliedConfig={snapshot.config} close={() => setEditor(null)} notify={notify} save={(id, value, extras) => { if (editor.kind === 'settings') { mutate(config => { config.runtime.server = value; }); setEditor(null); } else if (editor.kind === 'raw') { setDraft(value); setEditor(null); } else saveRecord(editor.kind, editor.id, id, value, extras); }}/ >}
     {integrationEditor && <IntegrationEditor key={integrationEditor} id={integrationEditor} config={draft} ui={{Button,Field,Modal}} close={() => setIntegrationEditor(null)} onCommand={name => { setIntegrationEditor(null); setEditor({kind:'commands',id:name,value:copy(draft.management.commands[name])}); }} save={(value,extras) => { mutate(config => { Object.assign(config.profiles,extras.profiles); config.management.labels ||= {}; for(const [id,label] of Object.entries(extras.profileLabels)) config.management.labels[`profile:${id}`]=label; config.management.integrations[integrationEditor] = value; pruneDetachedCommandProfiles(config,null); }); setIntegrationEditor(null); }}/ >}
     {preview && <Modal title="应用配置修改" eyebrow="REVIEW CHANGES" close={() => setPreview(null)} wide footer={<><Button onClick={() => setPreview(null)}>继续编辑</Button><Button primary disabled={busy} onClick={apply}>{pretty(snapshot.config.runtime.server) !== pretty(preview.config.runtime.server) ? '应用并重启服务' : '确认应用'}</Button></>}><div className="review-summary"><Icon name="check"/><div><strong>配置结构与路由验证通过</strong><p>{preview.validation_changes.length} 个验证用例的预期结果将随配置更新。</p></div></div>{pretty(snapshot.config.runtime.server) !== pretty(preview.config.runtime.server) && <div className="callout">转发服务参数发生变化，应用后会重启服务。</div>}{preview.validation_changes.length > 0 && <div className="review-list">{preview.validation_changes.map(change => <div key={change.name}><strong>{change.name}</strong><code>{change.after.rule_id} → {change.after.target} / {change.after.model}</code></div>)}</div>}<p className="muted">生效后，新的请求使用保存的路由配置。终端命令的启动参数在下次运行时读取。</p></Modal>}

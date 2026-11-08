@@ -373,7 +373,7 @@ fn resource(path: &Path, pointer: &str, action: ResourceAction) -> Result<()> {
     print_json(&json!({"revision":outcome["revision"],"saved":true}))
 }
 
-fn env_plan(
+pub(crate) fn env_plan(
     value: &Value,
     name: &str,
     final_stage: bool,

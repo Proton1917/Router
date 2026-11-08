@@ -1,6 +1,7 @@
 {
   "LICENSE": "LICENSE",
   "desktop/appearance.json": "appearance.json",
+  "desktop/onboarding.json": "onboarding.json",
   "desktop/THIRD_PARTY_NOTICES.txt": "THIRD_PARTY_NOTICES.txt",
   "router-rs/target/release/router": "router",
   "router-rs/examples/router.json": "examples/router.json",
@@ -14,6 +15,8 @@
   "scripts/client-integrations.py": "scripts/client-integrations.py",
   "scripts/claude-mods.py": "scripts/claude-mods.py",
   "scripts/claude-model-catalog.py": "scripts/claude-model-catalog.py",
+  "scripts/claude-subscription.py": "scripts/claude-subscription.py",
+  "scripts/claude-cli-options.json": "scripts/claude-cli-options.json",
   "scripts/claude-context-status.py": "scripts/claude-context-status.py",
   "scripts/model-context.py": "scripts/model-context.py",
   "scripts/provider-quota.py": "scripts/provider-quota.py",

@@ -3,18 +3,49 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Router</title><link rel="stylesheet" href="setup.css"></head>
 <body><div class="titlebar" data-tauri-drag-region></div><main>
   <div class="brand">router<span>DESKTOP</span></div>
-  <p class="eyebrow">本地模型路由控制台</p>
-  <h1>配置你的入口。</h1>
-  <p class="description">管理 API、模型与终端命令。配置保存在本机，转发服务在关闭窗口后继续运行。</p>
+  <h1 id="heading">连接你的第一个模型</h1>
+  <p class="description" id="description">选择客户端和服务商，Router 自动创建后台服务、模型配置与终端入口。</p>
   <div id="error" role="alert" hidden></div>
-  <button id="resume" class="primary" hidden>打开上次的配置</button>
-  <button id="choose">选择已有配置文件…</button>
-  <details id="new"><summary>创建新配置</summary>
-    <form id="create"><label>配置目录<input id="directory" required></label><label>终端入口目录<input id="launchers" required></label><div class="addresses"><label>转发监听地址<input id="gateway" required></label><label>控制台监听地址<input id="control" required></label></div>
-    <label class="checkbox"><input type="checkbox" id="shell" checked>自动配置 Zsh 终端入口</label>
-    <p class="hint">自动安装服务、网页资源与 router 命令。自动配置会向 ~/.zshrc 添加初始化语句，重新打开终端即可使用。API 凭据在控制台中添加，保存在所选目录的 credentials 文件夹。</p>
-    <button class="primary" type="submit">安装并打开控制台</button></form>
-  </details>
-  <p id="progress" role="status"></p>
-  <footer>Messages · Responses · 自定义路由</footer>
+  <section id="update-panel" hidden>
+    <p>应用将统一更新后台程序、网页和适配脚本，并重启服务。API 凭据、模型配置和转写结果保留。</p>
+    <p class="hint">请先结束正在使用 Router 的客户端会话；转写任务完成或取消后即可更新。</p>
+    <button id="update" class="primary">更新组件并打开</button>
+  </section>
+  <div class="existing"><button id="resume" hidden>打开已有配置</button><button id="choose">选择已有配置…</button></div>
+  <form id="create">
+    <fieldset><legend>接入服务</legend>
+      <div class="columns"><label>客户端<select id="client" required></select></label><label id="auth-field">接入方式<select id="authentication"><option value="subscription">Claude 官方订阅账号</option><option value="api">API Key</option></select></label></div>
+      <div id="api-fields"><label>服务商<select id="provider"></select></label>
+      <label id="address-field" hidden>API 基础地址<input id="base-url" type="url" placeholder="https://api.example.com" autocomplete="url"></label>
+      <label>API Key<input id="key" type="password" required autocomplete="off" spellcheck="false" placeholder="填写所选服务商的 API Key"></label>
+      <p class="hint">密钥保存到本机的受保护凭据文件。</p>
+      </div>
+      <div id="subscription-fields" hidden>
+        <p class="hint">平时使用主账号。官方客户端报告额度耗尽后，自动切换备用账号并恢复当前对话。登录和凭据由官方客户端管理。</p>
+        <label class="checkbox"><input type="checkbox" id="existing-account" checked>主账号沿用本机 Claude Code 登录</label>
+        <div id="accounts"></div><button id="add-account" type="button">添加备用账号</button>
+        <p class="hint">创建后直接进入账号管理，逐个点击“官方登录”。切换会自动重启客户端，按原生会话恢复规则继续处理。</p>
+      </div>
+      <div id="environment" class="environment" aria-live="polite"></div>
+      <div class="existing"><button id="dependency-help" type="button" hidden>打开 Homebrew 官方安装页</button><button id="refresh-environment" type="button">刷新程序状态</button></div>
+      <p class="hint" id="dependency-hint" hidden>下载官方 .pkg 安装包并按系统提示完成安装，然后点击“刷新程序状态”继续。系统授权在 macOS 安装程序中完成。</p>
+      <label class="checkbox" id="install-field" hidden><input type="checkbox" id="install" checked>自动安装所需客户端与 Python 3（使用 Homebrew）</label>
+      <button id="load-models" type="button">读取可用模型</button>
+    </fieldset>
+    <fieldset><legend>启动命令</legend>
+      <label id="model-list-field">模型<select id="model-list"><option value="">读取模型后选择，或在下方填写</option></select></label>
+      <div class="columns"><label id="model-field">模型 ID<input id="model" required spellcheck="false" placeholder="选择或填写模型 ID"></label><label>终端命令<input id="command" required pattern="[A-Za-z][A-Za-z0-9_-]*" spellcheck="false" placeholder="mycc"></label></div>
+      <p class="hint" id="model-hint">Router 会自动配置接口协议和认证方式。</p>
+      <p class="hint">命令名称会在新终端中作为 Router 入口生效；同名的系统程序可通过完整路径调用。</p>
+    </fieldset>
+    <details id="advanced"><summary>安装位置与高级设置</summary>
+      <label>配置目录<input id="directory" required></label><label>终端入口目录<input id="launchers" required></label>
+      <div class="columns"><label>转发监听地址<input id="gateway" required></label><label>控制台监听地址<input id="control" required></label></div>
+      <label class="checkbox"><input type="checkbox" id="shell" checked>自动配置 Zsh 终端入口</label>
+      <p class="hint">选中后向 ~/.zshrc 添加初始化语句，新终端即可使用命令。</p>
+      <button id="empty" type="button">创建空配置，进入控制台设置</button>
+    </details>
+    <button id="submit" class="primary" type="submit">创建并打开控制台</button>
+  </form>
+  <p id="progress" role="status" aria-live="polite"></p>
 </main><script src="setup.js"></script></body></html>

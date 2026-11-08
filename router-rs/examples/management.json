@@ -25,16 +25,28 @@
       "model_flags": []
     },
     "messages-client": {
-      "label": "Claude Code API",
+      "label": "Claude Code · API / 账号",
       "supports_mods": true,
-      "description": "通过网关调用兼容 Messages 的后端。",
-      "program": "claude",
+      "description": "选择 API 服务或官方订阅账号，分别保存模型和主备账号设置。",
+      "program": "python3",
+      "deferred": true,
+      "deferred_model_env": "ROUTER_DEFAULT_API_MODEL",
+      "api_gate": {"name":"ROUTER_CLAUDE_MODE", "contains":"api"},
+      "account_adapter": {"program":"python3", "args":["{{ config_directory }}/application/scripts/claude-subscription.py", "--manage-stdin"]},
       "model_adapter": {"program":"python3", "args":["{{ config_directory }}/application/scripts/claude-model-catalog.py"]},
       "context_window_range": {"min":100000,"max":1000000},
       "context_window_choices": [131072,262144,524288,786432,1000000],
       "compaction_routes": ["messages-compaction"],
       "subagent_routes": ["messages-subagent"],
       "options": {
+        "auth-mode": {
+          "label": "接入方式",
+          "default": "api",
+          "choices": {
+            "api": {"label":"API · 使用配置的服务与模型", "args":[]},
+            "account": {"label":"账号 · 官方订阅与备用账号", "args":[]}
+          }
+        },
         "router-speed": {
           "label": "Fast 控制方式（重新启动命令后生效）",
           "default": "client",
@@ -45,12 +57,18 @@
           }
         }
       },
-      "args": ["--settings", "{\"enabledPlugins\":{\"cc-plugin-agents-md@builtin\":true},\"pluginConfigs\":{\"cc-plugin-agents-md@builtin\":{\"options\":{\"instructionFiles\":\"claude-md-and-agents-md\"}}}}"],
+      "args": ["{{ config.management.assets_directory }}/../scripts/claude-subscription.py", "--settings", "{\"enabledPlugins\":{\"cc-plugin-agents-md@builtin\":true},\"pluginConfigs\":{\"cc-plugin-agents-md@builtin\":{\"options\":{\"instructionFiles\":\"claude-md-and-agents-md\"}}}}"],
       "model_flags": ["--model"],
       "header_env": "ANTHROPIC_CUSTOM_HEADERS",
+      "request_headers": {"authorization":"Bearer local-router"},
       "request_path": "/v1/messages",
       "route_before": "messages",
-      "env": {"ANTHROPIC_BASE_URL": "{{ gateway_url }}", "ANTHROPIC_AUTH_TOKEN": "local-router", "ANTHROPIC_API_KEY": "", "CLAUDE_CODE_MAX_CONTEXT_TOKENS":"200000"}
+      "api_env": {"ANTHROPIC_BASE_URL": "{{ gateway_url }}", "ANTHROPIC_AUTH_TOKEN": "local-router", "ANTHROPIC_API_KEY": "", "CLAUDE_CODE_MAX_CONTEXT_TOKENS":"200000"},
+      "env": {
+        "ROUTER_SUBSCRIPTION_CLIENT":"claude",
+        "ROUTER_SUBSCRIPTION_ACCOUNTS":"[]",
+        "ROUTER_SUBSCRIPTION_RESUME_PROMPT":"继续处理当前会话中尚待完成的用户请求，从已记录的工具结果接着执行。"
+      }
     },
     "responses-client": {
       "label": "Codex · API／独立账号",

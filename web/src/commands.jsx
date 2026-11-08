@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import './commands.css';
 import { customizeCommandProfile, profileUsages } from './model-ownership.js';
+import { SubscriptionAccounts } from './subscriptions.jsx';
 import { CatalogSelect, ProviderSelect, ReasoningControls, catalogDestination } from './catalogs.jsx';
 
 export function modelLabel(config, item, profiles = config.profiles, speed = 'standard') {
@@ -24,7 +25,7 @@ export function CommandList({ config, rows, edit, preview, remove, toggle, dirty
     return <article className="command-card" key={name}>
       <header><div><button className="command-name" onClick={() => edit(name, command)}><span>›</span>{name}</button><p className="cell-note">{command.label || template?.label}</p></div><button className={`toggle-label ${command.enabled !== false ? 'on' : ''}`} onClick={() => toggle(name, command)}><i/>{command.enabled !== false ? '可启动' : '已停用'}</button></header>
       <div className="command-card-meta"><span>{accountMode ? '独立账号登录' : template?.label}</span><span>{accountMode ? '官方模型菜单' : `${bindings.filter(item => item.visible).length || '原生'}${bindings.length ? ' 个可选模型' : '模型'}`}</span>{speedOption && !accountMode && <span>API · {speed === 'client' ? '客户端 /fast' : speed === 'fast' ? 'Router Fast' : '标准'}</span>}</div>
-      <div className="command-model-summary">{accountMode ? <p className="muted">使用独立账号的订阅额度，模型在 Codex 内选择。API 模型列表保留。</p> : bindings.map(item => {
+      <div className="command-model-summary">{accountMode ? <p className="muted">{template?.account_adapter ? '使用此命令的主账号与备用账号，支持手动切换和限额接续。' : '使用独立账号的订阅额度，模型在 Codex 内选择。API 模型列表保留。'}</p> : bindings.map(item => {
         const profile = config.profiles[item.profile];
         const target = speed === 'fast' ? profile?.fast || profile?.standard : profile?.standard;
         return <div key={item.id} className={item.visible ? '' : 'model-hidden'}><span><strong>{modelLabel(config,item,config.profiles,speed)}</strong>{speed === 'fast' && profile?.fast && <em>Fast</em>}{selectedModel === item.model && <em>默认</em>}{!item.visible && <em>隐藏</em>}</span><small>{config.management.labels?.[`backend:${target?.target}`] || target?.target}{target?.provider ? ` · ${target.provider}` : ''}</small></div>;
@@ -34,7 +35,7 @@ export function CommandList({ config, rows, edit, preview, remove, toggle, dirty
   })}</div>;
 }
 
-export function CommandEditor({ editor, config, close, save, ui, api, workspace }) {
+export function CommandEditor({ editor, config, appliedConfig, revision, configPath, close, save, ui, api, workspace }) {
   const { Button, Field, Modal, JsonField } = ui;
   const [name, setName] = useState(editor.id);
   const [editingKey] = useState(() => editor.id || `draft-${crypto.randomUUID()}`);
@@ -49,6 +50,8 @@ export function CommandEditor({ editor, config, close, save, ui, api, workspace 
   const [limitsError, setLimitsError] = useState('');
   const discoveryRequest = useRef(0);
   const template = config.management.templates[value.template];
+  const subscription = !!template?.account_adapter;
+  const subscriptionMode = subscription && (value.options?.['auth-mode'] || template.options?.['auth-mode']?.default) === 'account';
   const transcription = template?.env?.ROUTER_SPT === '1';
   const accountEnabled = !!template?.env?.ROUTER_CODEX_ACCOUNT_ARGS;
   const accountMode = accountEnabled && (value.options?.['auth-mode'] || template.options?.['auth-mode']?.default) === 'account';
@@ -58,7 +61,7 @@ export function CommandEditor({ editor, config, close, save, ui, api, workspace 
   const eligible = Object.entries(allProfiles).filter(([, profile]) => profile.standard.model && (!config.management.backend_protocols?.[profile.standard.target] || config.management.backend_protocols[profile.standard.target].includes(protocol)));
   const backends = Object.keys(config.runtime.backends).filter(key => !config.management.backend_protocols?.[key] || config.management.backend_protocols[key].includes(protocol));
   const bindings = value.model_bindings || [];
-  const discoveryEnabled = !!(config.management.context_discovery && template?.context_window_range);
+  const discoveryEnabled = !!(config.management.context_discovery && template?.context_window_range) && !subscriptionMode && !accountMode;
   const contextSignature = JSON.stringify([value.template,config.management.context_discovery,bindings.map(item => [item.id,allProfiles[item.profile]?.standard,allProfiles[item.profile]?.fast]),Object.entries(config.runtime.backends).map(([id,backend]) => [id,backend.base_url])]);
   async function loadContextLimits(refresh = false) {
     const requestId = ++discoveryRequest.current;
@@ -189,13 +192,15 @@ export function CommandEditor({ editor, config, close, save, ui, api, workspace 
       <Field label="命令名称"><input value={name} onChange={event => setName(event.target.value)}/></Field>
       <Field label="显示说明"><input value={value.label || ''} onChange={event => set('label',event.target.value)}/></Field>
       <Field label="启动方式"><select value={value.template} onChange={event => setValue(old => ({...old,template:event.target.value,options:{},mod_profile:config.management.templates[event.target.value]?.supports_mods ? old.mod_profile : undefined}))}>{Object.entries(config.management.templates).map(([id,template]) => <option key={id} value={id}>{template.label}</option>)}</select></Field>
-      <Field label={accountEnabled ? 'API 默认启动模型' : '默认启动模型'} hint={transcription ? '与语音转写页面的默认模型同步。' : accountMode ? '此选择保留给 API 模式；账号模式在 Codex 内选择官方模型。' : '跟随启动器时，保留此命令的现有默认选择。'}>
+      {subscription && <Field label="接入方式"><select value={value.options?.['auth-mode'] || template.options?.['auth-mode']?.default || 'api'} onChange={event => setValue(old => ({...old,options:{...old.options,'auth-mode':event.target.value}}))}><option value="api">API · 使用配置的服务与模型</option><option value="account">账号 · 官方订阅与备用账号</option></select></Field>}
+      {!subscriptionMode && <Field label={accountEnabled || subscription ? 'API 默认启动模型' : '默认启动模型'} hint={transcription ? '与语音转写页面的默认模型同步。' : accountMode ? '此选择保留给 API 模式；账号模式在 Codex 内选择官方模型。' : '跟随启动器时，保留此命令的现有默认选择。'}>
         {transcription ? <input disabled value={config.management.transcription?.default_model || '尚未配置'}/> : bindings.length ? <select disabled={accountMode} value={value.model || ''} onChange={event => set('model',event.target.value || null)}><option value="">跟随客户端或启动器</option>{bindings.filter(item => item.visible).map(item => <option key={item.id} value={item.model}>{label(item)}</option>)}</select> : <input disabled={accountMode} value={value.model || ''} onChange={event => set('model',event.target.value || null)} placeholder="跟随客户端或启动器"/>}
-      </Field>
+      </Field>}
     </div>
-    {Object.entries(template?.options || {}).filter(([key]) => !accountMode || key !== 'service-tier').map(([key,option]) => <Field key={key} label={option.label} hint={key === 'auth-mode' ? '设置默认启动模式；终端也可使用 --router-mode api 或 --router-mode account 临时选择。' : key === 'router-speed' && !bindings.length ? '在可选模型中添加模型后，可以选择 Router 服务等级。' : undefined}><select disabled={key === 'router-speed' && !bindings.length} value={value.options?.[key] || option.default} onChange={event => setValue(old => ({...old,options:{...old.options,[key]:event.target.value}}))}>{Object.entries(option.choices).map(([id,choice]) => <option key={id} value={id}>{choice.label}</option>)}</select></Field>)}
+    {subscriptionMode && <SubscriptionAccounts name={name} value={value} setValue={setValue} template={template} appliedConfig={appliedConfig} revision={revision} configPath={configPath} api={api} ui={ui}/>}
+    {Object.entries(template?.options || {}).filter(([key]) => !(subscription && key === 'auth-mode') && !(subscriptionMode && key === 'router-speed') && (!accountMode || key !== 'service-tier')).map(([key,option]) => <Field key={key} label={option.label} hint={key === 'auth-mode' ? '设置默认启动模式；终端也可使用 --router-mode api 或 --router-mode account 临时选择。' : key === 'router-speed' && !bindings.length ? '在可选模型中添加模型后，可以选择 Router 服务等级。' : undefined}><select disabled={key === 'router-speed' && !bindings.length} value={value.options?.[key] || option.default} onChange={event => setValue(old => ({...old,options:{...old.options,[key]:event.target.value}}))}>{Object.entries(option.choices).map(([id,choice]) => <option key={id} value={id}>{choice.label}</option>)}</select></Field>)}
     {accountEnabled && <section className="form-section"><h3>独立账号登录</h3><Field label="账号配置与凭据目录" hint="此目录保存该入口的登录凭据、配置与会话。使用独立目录即可同时保留其他账号。"><input value={accountHome} onChange={event => setValue(old => ({...old,env:{...old.env,ROUTER_CODEX_ACCOUNT_HOME:event.target.value}}))}/></Field><p className="muted">首次登录：<code>{name || '命令名称'} --router-mode account login</code>；查看登录状态：<code>{name || '命令名称'} --router-mode account login status</code>。账号模式的模型与 Fast 在 Codex 内选择，API 模型配置会保留。</p></section>}
-    {template?.request_path && !accountMode && <section className="command-model-editor"><header><div><h3>可选模型 <span>{bindings.length}</span></h3><p>显示名称留空时跟随后端模型。菜单、切换提示与状态名称使用同一份配置。</p></div><div>{discoveryEnabled && <Button disabled={loadingLimits} onClick={() => loadContextLimits(true)}>刷新模型上限</Button>}<Button onClick={add}>＋ 添加模型</Button></div></header>
+    {template?.request_path && !accountMode && !subscriptionMode && <section className="command-model-editor"><header><div><h3>可选模型 <span>{bindings.length}</span></h3><p>显示名称留空时跟随后端模型。菜单、切换提示与状态名称使用同一份配置。</p></div><div>{discoveryEnabled && <Button disabled={loadingLimits} onClick={() => loadContextLimits(true)}>刷新模型上限</Button>}<Button onClick={add}>＋ 添加模型</Button></div></header>
       {!bindings.length && <div className="callout">{value.profile ? `当前绑定：${config.management.labels?.[`profile:${value.profile}`] || value.profile}。` : '当前沿用现有路由规则。'}<Button onClick={() => { if (value.profile) setValue(old => ({...old,profile:null,match_all_models:false,model_bindings:[{id:'primary',profile:old.profile,model:old.model || config.management.profile_models?.[old.profile]?.[protocol] || allProfiles[old.profile].standard.model,label:'',description:'',visible:true,aliases:[],route_ids:[]}]})); else add(); }}>管理模型列表</Button></div>}
       {bindings.map((item,index) => { const profile = allProfiles[item.profile]; const target = profile?.standard; return <article className="command-model-item" key={item.id}>
         <header><div><span className="model-position">{String(index+1).padStart(2,'0')}</span><strong>{label(item)}</strong><small>{config.management.labels?.[`backend:${target?.target}`] || target?.target}</small></div><div className="model-item-actions"><button aria-label={`上移模型 ${index+1}`} disabled={index === 0} onClick={() => { const next = [...bindings]; [next[index-1],next[index]] = [next[index],next[index-1]]; set('model_bindings',next); }}>↑</button><button aria-label={`下移模型 ${index+1}`} disabled={index === bindings.length-1} onClick={() => { const next = [...bindings]; [next[index+1],next[index]] = [next[index],next[index+1]]; set('model_bindings',next); }}>↓</button><button className="delete-link" aria-label={`删除模型 ${index+1}`} onClick={() => setValue(old => ({...old,model:old.model === item.model ? null : old.model,model_bindings:old.model_bindings.filter(row => row.id !== item.id)}))}>删除</button></div></header>

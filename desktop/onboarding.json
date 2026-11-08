@@ -1,0 +1,14 @@
+{
+  "dependency_help_url": "https://github.com/Homebrew/brew/releases/latest",
+  "clients": {
+    "messages-client": {"label":"Claude Code", "program":"claude", "command":"cc", "protocol":"messages", "subscription_template":"messages-client", "install_args":["install","--cask","claude-code"]},
+    "responses-client": {"label":"Codex", "program":"codex", "command":"mycodex", "protocol":"responses", "install_args":["install","--cask","codex"]}
+  },
+  "providers": {
+    "anthropic": {"label":"Anthropic", "base_url":"https://api.anthropic.com", "protocols":["messages"], "headers":{"x-api-key":"{token}","anthropic-version":"2023-06-01"}, "catalog_path":"/v1/models"},
+    "openai": {"label":"OpenAI", "base_url":"https://api.openai.com", "protocols":["responses"], "headers":{"authorization":"Bearer {token}"}, "catalog_path":"/v1/models"},
+    "openrouter": {"label":"OpenRouter", "base_url":"https://openrouter.ai/api", "protocols":["messages","responses"], "headers":{"authorization":"Bearer {token}"}, "catalog_path":"/v1/models"},
+    "deepseek": {"label":"DeepSeek", "base_url":"https://api.deepseek.com/anthropic", "protocols":["messages"], "headers":{"authorization":"Bearer {token}"}, "catalog_url":"https://api.deepseek.com/models", "catalog_path":"/models"},
+    "custom": {"label":"自定义兼容服务", "base_url":"", "protocols":["messages","responses"], "headers":{"authorization":"Bearer {token}"}, "catalog_path":"/v1/models"}
+  }
+}

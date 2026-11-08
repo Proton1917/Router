@@ -17,7 +17,7 @@
       "capabilities": [{
         "identifier": "setup",
         "windows": ["setup"],
-        "permissions": ["allow-setup-info", "allow-choose-config", "allow-create-config", "allow-open-saved", "core:window:allow-start-dragging"]
+        "permissions": ["allow-setup-info", "allow-choose-config", "allow-create-config", "allow-open-saved", "allow-setup-models", "allow-dependency-help", "allow-update-installation", "core:event:default", "core:window:allow-start-dragging"]
       }, {
         "identifier": "console-window",
         "windows": ["console-*"],

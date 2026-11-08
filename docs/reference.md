@@ -7,7 +7,7 @@
 取得源码后，在项目根目录执行。需要 macOS 14+、Xcode Command Line Tools、Rust stable（Tauri 2.12 要求至少 Rust 1.90）、Node.js 20.19+ 或 22.12+、npm 和 Pixi。依赖由 Cargo、npm 和 Pixi 锁文件固定。
 
 ```sh
-git clone --branch v0.6.0 https://github.com/Proton1917/Router.git
+git clone https://github.com/Proton1917/Router.git
 cd Router
 npm ci --prefix desktop
 # 下载本版本配套的 SPT worker 源码，并构建其 release 程序。
@@ -320,6 +320,18 @@ Rust 实现配置校验、规则执行、HTTP 传输和协议编解码。增加�
 `{provider}` 取自所选 profile 或该 profile 允许的请求头覆盖。`field_policy` 支持字段保留、删除、重命名、赋值、空值处理和指定文本行替换；`header_policy` 支持请求头过滤及固定字段。接入新后端时按其实际协议配置这些规则。
 
 ## Claude Code
+
+### 官方订阅账号适配
+
+Claude Code 启动模板复用 `scripts/claude-subscription.py`，通过 `options.auth-mode` 选择 `api` 或 `account`。`api_gate` 读取启动器确定的 `ROUTER_CLAUDE_MODE`，API 环境、模型菜单和上下文设置在 API 分支应用。已有机器专用启动器通过 `ROUTER_CLAUDE_API_LAUNCHER` 引用；直接 API 启动通过 Router 的 `__exec` 完成。
+
+每个命令的 `env.ROUTER_SUBSCRIPTION_ACCOUNTS` 保存独立 JSON 数组，每项包含 `id`、`label`、`directory`，第一项为主账号。`ROUTER_SUBSCRIPTION_CLIENT` 指定官方客户端，`ROUTER_SUBSCRIPTION_RESUME_PROMPT` 保存接续提示。默认配置目录使用官方默认登录；其他目录通过 `CLAUDE_CONFIG_DIR` 隔离登录。
+
+启动器通过临时设置添加 `SessionStart`、`UserPromptSubmit`、`Stop`、`StopFailure` Hook 和账号状态栏。Hook 向本次进程的本机监听端口发送结构化事件，并使用随机会话标记验证来源。控制凭据保存在配置声明的凭据目录，退出后清理。原有状态栏继续接收原始数据。限额事件触发备用选择，手动切换在当前回复结束后执行，随后使用官方 `--resume` 载入记录。运行与切换记录位于 `client-state/subscriptions/<命令>/`。
+
+`scripts/claude-cli-options.json` 声明当前客户端的参数结构，由标准库 `argparse` 分离启动提示词及会话恢复参数，其他选项继续传递给官方客户端。`--router-account` 临时选择账号，`--router-manage status` 查询状态，`--router-manage switch` 配合 `--router-session` 指定正在运行的会话。
+
+启动模板的 `account_adapter` 使用现有 `ProcessSpec`。`POST /api/accounts/action` 接收 `name`、`action`、可选 `account`、`session`；变更操作同时传入配置 `revision`。操作为 `status`、`login`、`logout`、`switch`。适配程序从标准输入读取 JSON，继承命令环境及 `ROUTER_CONFIG`、`ROUTER_COMMAND_NAME`，在 45 秒内返回结果。官方浏览器登录由独立客户端流程执行，手动切换通过受保护的本机会话控制通道提交。
 
 将 Claude Code 的 API 地址指向 router，并选择后端实际支持的模型：
 

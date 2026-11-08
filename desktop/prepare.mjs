@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildEnvironment } from './build-environment.mjs';
@@ -21,4 +21,5 @@ for (const [source, destination] of Object.entries(entries)) {
   cpSync(`${root}${source}`, output, { recursive: true });
 }
 cpSync(`${root}web/dist`, `${resources}/web`, { recursive: true });
+writeFileSync(`${resources}/installation.json`, JSON.stringify({version: JSON.parse(readFileSync(`${desktop}package.json`, 'utf8')).version, build: new Date().toISOString()}, null, 2) + '\n');
 execFileSync(`${desktop}node_modules/.bin/tauri`, ['icon', 'icon.svg', '--output', 'src-tauri/icons'], { cwd: desktop, stdio: 'inherit' });
