@@ -6,7 +6,7 @@ Router 是一个通过外部 JSON 配置的 Rust 模型路由服务，提供 Tau
 
 当前桌面安装包适用于 **Apple Silicon、macOS 14 及以上**，项目采用 [MIT 许可证](LICENSE)。
 
-本文说明当前源码的功能。已发布安装包为 v0.6.0；首次接入引导与 Claude 主备账号管理可按[源码构建步骤](docs/reference.md#从源码构建桌面安装包)使用。
+v0.7.0 提供首次接入引导、应用组件更新和 Claude 主备账号管理。
 
 - [安装与首次打开](#安装与首次打开)
 - [第一次配置 API 和启动命令](#第一次配置-api-和启动命令)
@@ -45,7 +45,7 @@ brew install --cask Proton1917/tap/router
 open -a Router
 ```
 
-也可在 [v0.6.0 Release](https://github.com/Proton1917/Router/releases/tag/v0.6.0) 下载 `Router_0.6.0_aarch64.dmg`，打开后将 **Router.app** 拖入“应用程序”。
+也可在 [v0.7.0 Release](https://github.com/Proton1917/Router/releases/tag/v0.7.0) 下载 `Router_0.7.0_aarch64.dmg`，打开后将 **Router.app** 拖入“应用程序”。
 
 如需验证下载完整性，将安装包与同页的 `SHA256SUMS.txt` 放在同一目录，在该目录执行：
 
@@ -53,7 +53,7 @@ open -a Router
 shasum -a 256 --ignore-missing -c SHA256SUMS.txt
 ```
 
-确认输出 `Router_0.6.0_aarch64.dmg: OK`。校验文件也包含配套 SPT 源码包的记录，`--ignore-missing` 允许只下载桌面安装包。
+确认输出 `Router_0.7.0_aarch64.dmg: OK`。校验文件也包含配套 SPT 源码包的记录，`--ignore-missing` 允许只下载桌面安装包。
 
 当前应用采用 ad-hoc 签名，尚未经过 Apple 公证。首次打开受到 Gatekeeper 阻止时，确认下载来源后，在“系统设置 → 隐私与安全性”中允许打开。
 
