@@ -21,6 +21,7 @@
   "scripts/model-context.py": "scripts/model-context.py",
   "scripts/provider-quota.py": "scripts/provider-quota.py",
   "scripts/sync-bridge-catalog.py": "scripts/sync-bridge-catalog.py",
+  "scripts/publish-model-catalog.py": "scripts/publish-model-catalog.py",
   "scripts/spt-launch.py": "scripts/spt-launch.py",
   "scripts/codex-api.zsh": "scripts/codex-api.zsh",
   "scripts/codex-launch.py": "scripts/codex-launch.py",

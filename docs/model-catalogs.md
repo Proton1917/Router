@@ -62,7 +62,7 @@
 
 选择模型时，供应商输入框查询该模型的端点列表。用户可选择返回的 tag 或直接填写 tag；应用后继续使用该目标原有的供应商锁定设置。
 
-模型选择控件中的“后台监控”与检查间隔随应用修改保存。后台 Router 运行时默认每 30 秒查询，关闭控制台后继续检查。打开模型编辑或切换后端时立即同步。首次成功结果作为比较基准，后续显示新增、移除及名称、上下文、能力字段的变化；点击“标记已查看”更新基准。后台只读取目录，模型替换由用户选择并应用。
+模型选择控件中的“后台监控”与检查间隔随应用修改保存。后台 Router 运行时按来源的间隔查询，关闭控制台后继续检查。打开模型编辑或切换后端时立即同步。首次成功结果作为比较基准，后续显示新增、移除及名称、上下文、能力字段的变化。点击“标记已查看”更新基准。
 
 各页面共享同一后端的缓存。读取失败时显示错误并保留已读取的模型，现有模型转发继续使用保存的路由。没有目录接口的后端可在选择控件中手动填写模型 ID。
 
@@ -113,6 +113,24 @@
 独立的目录服务通过 `request_url` 指定 HTTPS 地址，并通过 `credential_file`、`token_pointer` 读取对应访问令牌。配置 `request_body` 时使用 POST；`body_credentials` 将凭据 JSON 中指定指针的值填入请求字段。`rows_pointer` 可指向数组或以模型 ID 为键的对象，`required_pointers` 用于只选取包含指定属性的条目。`destination` 声明从目录新建模型时使用的默认请求策略，前端填入选中的 `target` 和 `model`。
 
 `on_update` 可配置目录变化后的适配程序，`update_settings` 保存其参数。程序从标准输入读取模型数组和设置；执行成功后发布新目录。Antigravity 的桥接同步使用 `scripts/sync-bridge-catalog.py`（依赖 PyYAML），将服务端模型元数据写入 CLIProxyAPI 支持的 `models.catalog` 本机文件。文件内容变化时切换两个固定文件名，触发桥接服务重新加载；相同内容复用现有文件。这样新增模型可以在桥接服务中注册，已有会话继续使用当前路由。
+
+### 自动登记到启动命令
+
+各后端可以共用 `scripts/publish-model-catalog.py`。目录变化时，脚本按 `register` 中的规则查找尚未登记的模型，通过本机管理接口保存命令绑定和路由。共享 `/v1/models` 随配置更新，新的 Claude Code API 会话读取更新后的菜单。
+
+```json
+{
+  "on_update": {
+    "program": "python3",
+    "args": ["{{ config_directory }}/application/scripts/publish-model-catalog.py", "{{ config_path }}", "my-api"]
+  },
+  "update_settings": {
+    "register": [{"command": "cc", "include": "my-model-[0-9]+"}]
+  }
+}
+```
+
+`include` 是匹配完整模型 ID 的正则表达式。来源配置了 `reasoning_variants` 时，表达式匹配去除档位后缀的模型系列，`required_efforts` 声明登记所需的档位。登记沿用来源的 `destination` 请求策略，按启动命令的接口协议检查后端支持范围。已有模型 ID 和兼容名称继续由现有绑定管理，手工隐藏的条目仍算作已登记。需要同步 CLIProxyAPI 时，`update_settings.bridge` 保存桥接适配程序的设置，桥接目录先于命令登记更新。
 
 目录检查间隔允许 30–86400 秒，单次查询超时允许 1–120 秒，响应上限为 8 MiB。目录参数、供应商地址和模型名称均来自 JSON，通用查询、字段提取、缓存和比较由 Rust 执行。
 
