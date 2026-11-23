@@ -162,7 +162,7 @@ Claude Code 启动方式声明 `context_window_range: {"min":100000,"max":100000
 
 启动方式的 `compaction_routes` 与 `subagent_routes` 分别列出系统压缩和子任务规则 ID。条目设置 `compact_with_self: true` 或 `subagents_with_self: true` 后，Router 在对应系统规则前生成匹配命令和主模型的专属规则，使用该条目的 profile；缺省为 `false`，沿用系统规则。系统规则须声明客户端上下文及任务请求头或压缩提示匹配条件。示例使用原生 `x-claude-code-request-class` 分类；Claude Code 适配脚本启用 `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`，并通过 `inherit` 和 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` 保留子任务所属的主模型。原生分类与继承在 Claude Code 2.1.304 验证。系统压缩模型或子任务模型的后端、模型和供应商由对应系统规则的 profile 配置。
 
-`management.context_discovery` 配置目录适配程序、缓存目录、缓存有效期及各后端的目录字段。打开命令编辑窗口或切换目标时，界面自动查询真实 API 模型和供应商的上限，标准与 Fast 共用一个预算时取两者较小值；“刷新模型上限”重新请求目录。管理接口预览、保存和客户端启动均校验该上限，留空的启动器基线也会受已识别上限限制。目录结果只缓存模型和上限等元数据，凭据继续读取独立来源。网络错误明确显示；没有公布数值的目标显示上限未知，其物理最大窗口需要后端提供。目录查询发生在配置操作和客户端启动时，转发请求不执行目录查询。
+`management.context_discovery` 配置上下文适配程序、缓存有效期及供应商端点和预设的补充查询。模型的基础上下文读取 Router 后端目录的统一记录。标准、Fast 和可选思考档位共用预算时，取已确认的较小上限。“刷新模型上限”刷新该后端的目录，并更新供应商端点数据。管理接口预览、保存和客户端启动均校验已识别的上限。缺少数值时，界面显示上限未知。
 
 目录字段使用 JSON 数组表示属性路径，例如 `rows:["data"]`、`id:"id"`、`context:["context_length"]`。目录与推理接口使用不同地址时，在该后端的目录来源中设置独立的 `base_url`；`auth_headers` 可设置目录专用认证头模板，通过 `{token}` 引用同一后端的独立凭据。例如 DeepSeek 的推理地址可使用 `/anthropic`，目录来源使用 `https://api.deepseek.com`、`path:"/models"`、`context:["context_window"]` 和 `Authorization: Bearer {token}`。可通过 `endpoints` 声明供应商目录路径、数组位置、供应商标识及上下文字段；`presets` 可声明预设当前版本的模型与供应商位置。API 路径、字段、缓存时间和具体模型均由配置定义，Rust 调用通用适配接口。
 
@@ -176,11 +176,11 @@ Claude Code 启动方式通过 `model_adapter` 调用 `scripts/claude-model-cata
 
 运行 `node scripts/check-model-editing.mjs /absolute/path/to/router.json` 可通过同一管理接口检查独享配置编辑、共享配置副本、绑定删除与替换，以及应用后的关联路由数量。检查使用指定的实际配置，只发送预览，不保存修改。
 
-`scripts/codex-api.zsh` 调用 `codex-model-source.py`，按命令绑定从后端直接读取模型目录。该程序使用配置中的凭据来源查询后端，再用当前 Codex 的本机模型格式生成目录。后端提供真实模型 ID、名称、上下文长度和输入类型；原生模型保留对应的客户端基础说明，其他模型使用客户端的默认基础说明。后端目录须包含 `data` 数组、`context_length`、`architecture.input_modalities` 和 `supported_parameters`；OpenRouter 提供此格式。目录缺少配置模型或必要能力字段时，启动立即失败。
+`scripts/codex-api.zsh` 调用 `codex-model-source.py`，从 Router 的统一后端目录读取已配置模型，再转成当前 Codex 的本机模型格式。原生模型保留对应的基础说明，其他模型使用客户端的默认说明。目录格式由各后端的 `model_catalogs` 映射，命令绑定保存自己的模型 ID 和服务等级。模型上下文来自目录或命令配置。
 
-启动器合并启动方式的默认服务等级和 Fast 目标中的服务等级。环境变量 `ROUTER_CODEX_DEFAULT_SERVICE_TIERS` 接受包含 `id`、`name`、`description` 的 JSON 对象数组；OpenRouter 入口可将 `priority` 声明为目录模型的默认 Fast 服务等级。`ROUTER_CODEX_CATALOG_PATH` 设置目录路径，默认为 `/v1/models`；`ROUTER_CODEX_CATALOG_PYTHON` 设置 Python 3 程序，默认为 `python3`。该流程依赖 Python 3 标准库、Zsh（含 `zsh/system`）、jq 与 shasum。启动脚本的参数依次为 router 配置文件、目录保存位置、Codex 程序、provider 参数、`--` 和客户端参数。目录应位于仓库外；会话使用的临时文件在客户端退出时删除。API 客户端的会话内快捷命令由客户端自身决定。
+启动器合并启动方式默认服务等级和 Fast 目标中的服务等级。`ROUTER_CODEX_DEFAULT_SERVICE_TIERS` 接受包含 `id`、`name`、`description` 的 JSON 对象数组，`ROUTER_CODEX_CATALOG_PYTHON` 选择 Python 3 程序。启动脚本依次接收 Router 配置文件、目录保存位置、Codex 程序、Router 程序、provider 参数、`--` 和客户端参数。
 
-每个启动命令保存一份已校验的精简模型目录，默认有效期为 300 秒。启动方式的环境变量 `ROUTER_CODEX_CATALOG_CACHE_SECONDS` 可调整有效期，设为 `0` 时每次启动都重新获取。配置、provider 参数、Codex 版本或目录适配脚本变化会立即使缓存失效。并发启动通过文件锁协调更新；失效目录必须重新获取并通过校验，失败时停止启动。缓存文件权限为 `0600`，只保存精简目录和校验信息；所有 Codex 调用均继承调用者原有的 `umask`。
+并发启动复用 Router 的后端目录缓存。每次启动生成权限为 `0600` 的 Codex 模型目录，退出时清理该会话文件。启动的 Codex 进程继承调用者原有的 `umask`。
 
 `router run` 向启动程序提供 `ROUTER_COMMAND_NAME`。设置 `model_bindings` 时，Codex 目录只保留该列表中的可见条目；其余命令使用单模型绑定和带该命令标记的专属路由。名单来自配置，保留上游返回的能力信息。直接调用适配脚本时需设置同名环境变量。修改命令绑定或专属路由后，重新启动客户端即可读取新的模型列表。
 
@@ -230,7 +230,9 @@ npm run build --prefix web
 
 每个客户端声明协议、网关地址、检查路径、请求头和模型入口。模型入口保留客户端兼容 ID，并生成独立的上下文路由及验证用例。目录入口隐藏后，已有会话使用的路由继续保留。地址和目录同步在保存路由配置后执行；同步失败会显示错误，可以重新“应用已保存配置”。
 
-Rust 负责校验、路由生成、管理接口和有超时限制的适配程序调用。客户端目录格式和部署路径由外部配置及 `scripts/client-integrations.py` 管理。适配程序通过标准输入接收 JSON，通过标准输出返回包含 `ok` 的 JSON 结果，支持 `inspect`、`sync`、`check`。配置中的路径和命令可按部署环境调整。
+Rust 负责校验、路由生成、管理接口和有超时限制的适配程序调用。适配程序通过标准输入接收 JSON，通过标准输出返回包含 `ok` 的 JSON 结果，支持 `inspect`、`sync`、`check`。共用的 `scripts/client-integrations.py` 可通过 `settings.handler` 加载客户端的 Python 模块。模块实现 `run(request, gateway_check)`，由共享入口协调客户端配置写入和网关检查。
+
+Cherry Studio 适配程序按 `commands` 和 `settings.include` 选取命令目录中的模型，在 `settings.database` 指定的 SQLite 数据库内更新 `settings.provider_id` 对应服务。同步登记模型的名称、已知输入模态、上下文和思考档位。兼容模型 ID 继续在原有记录中使用。`settings.endpoint` 应指定这一服务现用的接入协议。
 
 提供的适配程序支持活动 JSON 模型目录，以及 Office WebKit 中已有的插件接入存储。JSON 修改保留其他字段，Office 修改通过 SQLite 事务更新接入项，写入前在受保护目录保存备份。真实上游凭据仍由 router 单独读取，客户端使用本地占位令牌。Office 的首次安装或首次加载由宿主应用完成；同步后重新打开客户端或插件载入地址和目录，路由调整对后续请求生效。连接检查验证网关、HTTPS 证书及目录，不代表上游账号已获得所有模型权限。
 
@@ -283,6 +285,8 @@ Rust 实现配置校验、规则执行、HTTP 传输和协议编解码。增加�
 
 `runtime.server.endpoints` 将路径绑定到 `messages`、`responses`、`chat_completions`、`models` 或 `passthrough`。路径支持末尾 `*`，精确匹配优先，其次选择最长前缀；客户端的 `paths` 使用同一规则。Responses 的创建、压缩、读取和删除等路径可以分别配置。`passthrough` 保留原始请求体字节。`runtime.backends.<id>.path_rewrites` 将入站路径映射到上游路径，并保留查询参数。
 
+`runtime.clients[].message_compatibility` 为匹配到的 Messages 客户端启用目录和流式响应兼容处理。`runtime.backends.<id>.web_search` 则在支持对应搜索报文的后端启用工具和引用转换。实际选择由客户端规则、协议和最终后端配置共同决定。
+
 配置文件中的凭据文件、凭据命令和客户端设置文件允许绝对路径或相对于配置文件所在目录的路径。凭据支持 `token_env`、`token_file`、`token_command`、`oauth` 四种来源，每个后端选择其中一种。凭据值应存放在仓库外。`oauth` 由 Router 独立处理浏览器 PKCE 或设备码登录，以及访问令牌刷新；参数和操作见 [OAuth 配置](oauth.md)。
 
 后端的 `auth.error_hint` 可填写凭据读取失败时的处理说明，例如重新登录所用的命令。该说明会随错误返回客户端，因此只应包含可公开的操作指引。凭据程序的标准错误输出不会传给客户端。
@@ -307,6 +311,8 @@ Rust 实现配置校验、规则执行、HTTP 传输和协议编解码。增加�
 
 `start_command` 必须启动后台服务并在期限内返回。程序使用文件锁协调并发启动；认证失败、非预期 HTTP 状态和启动失败会直接返回错误。服务端应只监听回环地址，OAuth 凭据与本机服务令牌均保存于仓库外的受保护目录。健康检查证明本机适配服务可用，上游模型权限需要通过真实请求验证。
 
+桥接 OAuth 服务可在令牌配置中增加 `bridge`，提供回环管理 `base_url`、`provider` 和 `token_file`。当所有启用的账号均不可用且其中一个令牌确实已经过期时，凭据程序在原锁内调用桥接服务的单账号续期接口，成功后再提供本机服务令牌。
+
 供应商参数由 `runtime.backends.<id>.provider_fields` 声明。例如某个后端要求 `provider.only` 时，可配置：
 
 ```json
@@ -325,9 +331,15 @@ Rust 实现配置校验、规则执行、HTTP 传输和协议编解码。增加�
 
 Claude Code 启动模板复用 `scripts/claude-subscription.py`，通过 `options.auth-mode` 选择 `api` 或 `account`。`api_gate` 读取启动器确定的 `ROUTER_CLAUDE_MODE`，API 环境、模型菜单和上下文设置在 API 分支应用。已有机器专用启动器通过 `ROUTER_CLAUDE_API_LAUNCHER` 引用；直接 API 启动通过 Router 的 `__exec` 完成。
 
-每个命令的 `env.ROUTER_SUBSCRIPTION_ACCOUNTS` 保存独立 JSON 数组，每项包含 `id`、`label`、`directory`，第一项为主账号。`ROUTER_SUBSCRIPTION_CLIENT` 指定官方客户端，`ROUTER_SUBSCRIPTION_RESUME_PROMPT` 保存接续提示。默认配置目录使用官方默认登录；其他目录通过 `CLAUDE_CONFIG_DIR` 隔离登录。
+每个命令的 `env.ROUTER_SUBSCRIPTION_ACCOUNTS` 保存独立 JSON 数组，每项包含 `id`、`label`、`directory`，第一项优先使用。默认名称为“账号 1”“账号 2”，名称与使用顺序分别保存。`ROUTER_SUBSCRIPTION_CLIENT` 指定官方客户端，`ROUTER_SUBSCRIPTION_RESUME_PROMPT` 保存接续提示。默认配置目录使用官方默认登录；其他目录通过 `CLAUDE_CONFIG_DIR` 隔离登录。
 
-启动器通过临时设置添加 `SessionStart`、`UserPromptSubmit`、`Stop`、`StopFailure` Hook 和账号状态栏。Hook 向本次进程的本机监听端口发送结构化事件，并使用随机会话标记验证来源。控制凭据保存在配置声明的凭据目录，退出后清理。原有状态栏继续接收原始数据。限额事件触发备用选择，手动切换在当前回复结束后执行，随后使用官方 `--resume` 载入记录。运行与切换记录位于 `client-state/subscriptions/<命令>/`。
+“服务与额度 → 账号与额度”读取上述命令的登录状态与最近一次官方额度。订阅启动器从交互会话的状态栏接收 `rate_limits`，将两种时间窗口与当前账号身份一起保存到 `client-state/subscriptions/<命令>/quota-<账号 ID>.json`。控制台通过 `/api/accounts/action` 的 `overview` 操作读取账号及额度，账号配置与切换沿用对应的启动命令设置。
+
+启动器通过会话设置添加 `SessionStart`、`UserPromptSubmit`、`Stop`、`StopFailure` Hook 和账号状态栏。Hook 命令携带受保护控制文件的路径，每次读取当前监听端口与随机认证标记；控制凭据保存在配置声明的凭据目录。原有状态栏继续接收原始数据。
+
+控制器记录原生后台化产生的会话 ID，并通过官方 `agents --json` 查询对应进程。前台退出或终端挂断后，仍在运行的原生会话由独立控制器继续接收事件。原生进程结束时，控制器进入 `dormant` 状态并释放进程；保存的 Hook 设置、控制文件和恢复参数随可恢复会话保留。再次打开该原生会话时，Hook 通过文件锁协调启动控制器并读取新的端口。控制连接异常会明确报告会话及恢复方法。控制器日志写入管理配置的日志目录，沿用现有日志轮换。
+
+限额事件触发备用选择，手动切换在当前回复结束后执行。后台会话通过官方 `stop` 结束对应进程，再用 `--resume` 在所选账号下继续；后台模式使用 `--bg`，前台模式保留交互终端。运行与切换记录位于 `client-state/subscriptions/<命令>/`。已启动的监督器保留启动时载入的代码，后续常规启动与恢复载入当前适配程序。
 
 `scripts/claude-cli-options.json` 声明当前客户端的参数结构，由标准库 `argparse` 分离启动提示词及会话恢复参数，其他选项继续传递给官方客户端。`--router-account` 临时选择账号，`--router-manage status` 查询状态，`--router-manage switch` 配合 `--router-session` 指定正在运行的会话。
 

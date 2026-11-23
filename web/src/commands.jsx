@@ -3,6 +3,7 @@ import './commands.css';
 import { customizeCommandProfile, profileUsages } from './model-ownership.js';
 import { SubscriptionAccounts } from './subscriptions.jsx';
 import { CatalogSelect, ProviderSelect, ReasoningControls, catalogDestination } from './catalogs.jsx';
+import { catalogModelMatches, modelFamilyId } from './reasoning-models.js';
 
 export function modelLabel(config, item, profiles = config.profiles, speed = 'standard') {
   const profile = profiles[item.profile];
@@ -25,7 +26,7 @@ export function CommandList({ config, rows, edit, preview, remove, toggle, dirty
     return <article className="command-card" key={name}>
       <header><div><button className="command-name" onClick={() => edit(name, command)}><span>›</span>{name}</button><p className="cell-note">{command.label || template?.label}</p></div><button className={`toggle-label ${command.enabled !== false ? 'on' : ''}`} onClick={() => toggle(name, command)}><i/>{command.enabled !== false ? '可启动' : '已停用'}</button></header>
       <div className="command-card-meta"><span>{accountMode ? '独立账号登录' : template?.label}</span><span>{accountMode ? '官方模型菜单' : `${bindings.filter(item => item.visible).length || '原生'}${bindings.length ? ' 个可选模型' : '模型'}`}</span>{speedOption && !accountMode && <span>API · {speed === 'client' ? '客户端 /fast' : speed === 'fast' ? 'Router Fast' : '标准'}</span>}</div>
-      <div className="command-model-summary">{accountMode ? <p className="muted">{template?.account_adapter ? '使用此命令的主账号与备用账号，支持手动切换和限额接续。' : '使用独立账号的订阅额度，模型在 Codex 内选择。API 模型列表保留。'}</p> : bindings.map(item => {
+      <div className="command-model-summary">{accountMode ? <p className="muted">{template?.account_adapter ? '管理此命令的账号与使用顺序，支持手动切换和限额接续。' : '使用独立账号的订阅额度，模型在 Codex 内选择。API 模型列表保留。'}</p> : bindings.map(item => {
         const profile = config.profiles[item.profile];
         const target = speed === 'fast' ? profile?.fast || profile?.standard : profile?.standard;
         return <div key={item.id} className={item.visible ? '' : 'model-hidden'}><span><strong>{modelLabel(config,item,config.profiles,speed)}</strong>{speed === 'fast' && profile?.fast && <em>Fast</em>}{selectedModel === item.model && <em>默认</em>}{!item.visible && <em>隐藏</em>}</span><small>{config.management.labels?.[`backend:${target?.target}`] || target?.target}{target?.provider ? ` · ${target.provider}` : ''}</small></div>;
@@ -105,10 +106,14 @@ export function CommandEditor({ editor, config, appliedConfig, revision, configP
   }
   const set = (key, next) => setValue(old => ({...old,[key]:next}));
   const label = item => item.label || profileLabels[item.profile] || modelLabel(config,item,allProfiles);
+  function clientModel(profile) {
+    const target = allProfiles[profile]?.standard;
+    return config.management.profile_models?.[profile]?.[protocol] || (target?.reasoning_models ? modelFamilyId(target.model,config.management.model_catalogs?.[target.target]) : target?.model) || '';
+  }
   function update(index, changes) { setValue(old => ({...old,model_bindings:old.model_bindings.map((item,at) => at === index ? {...item,...changes} : item)})); }
   function selectProfile(index, profile) {
     const item = bindings[index];
-    const model = config.management.profile_models?.[profile]?.[protocol] || allProfiles[profile].standard.model;
+    const model = clientModel(profile);
     const existing = editor.value.model_bindings?.some(row => row.id === item.id);
     const aliases = [...new Set([...(item.aliases || []),...(existing && item.model && item.model !== model ? [item.model] : [])])].filter(alias => alias !== model);
     setValue(old => ({...old,model:old.model === item.model ? model : old.model,model_bindings:old.model_bindings.map((row,at) => at === index ? {...row,profile,model,aliases,label:'',description:''} : row)}));
@@ -116,10 +121,10 @@ export function CommandEditor({ editor, config, appliedConfig, revision, configP
   function add() {
     if (!backends.length) { setError('请先在“服务与额度”添加支持此启动方式的 API 后端。'); return; }
     const profile = eligible[0]?.[0] || `command-model-${crypto.randomUUID().replaceAll('-','')}`;
-    const model = config.management.profile_models?.[profile]?.[protocol] || allProfiles[profile]?.standard.model || '';
+    const model = clientModel(profile);
     if (!allProfiles[profile]) setProfiles(old=>({...old,[profile]:{standard:{target:backends[0],model:''}}}));
     setValue(old => {
-      const previous = old.model_bindings?.length ? old.model_bindings : old.profile ? [{id:'primary',profile:old.profile,model:old.model || config.management.profile_models?.[old.profile]?.[protocol] || allProfiles[old.profile].standard.model,label:'',description:'',visible:true,aliases:[],route_ids:[]}] : [];
+      const previous = old.model_bindings?.length ? old.model_bindings : old.profile ? [{id:'primary',profile:old.profile,model:old.model || clientModel(old.profile),label:'',description:'',visible:true,aliases:[],route_ids:[]}] : [];
       return {...old,profile:null,match_all_models:false,model:old.model || (old.profile ? previous[0].model : editor.fresh ? model : null),model_bindings:[...previous,{id:`m${crypto.randomUUID().slice(0,8)}`,model,profile,label:'',description:'',visible:true,aliases:[],route_ids:[]}]};
     });
   }
@@ -138,10 +143,11 @@ export function CommandEditor({ editor, config, appliedConfig, revision, configP
   }
   function selectRemote(index, row, backend) {
     const item = bindings[index];
-    if (allProfiles[item.profile]?.standard.model === row.id && allProfiles[item.profile]?.standard.target === backend && (!row.reasoning_models || allProfiles[item.profile]?.standard.reasoning_models)) return;
+    const matches = target => target?.target === backend && catalogModelMatches(row,target.model) && (!row.reasoning_models || target.reasoning_models);
+    if (item.model === row.id && matches(allProfiles[item.profile]?.standard)) return;
     const shared = scopes[item.id] === 'shared';
-    const existing = eligible.find(([,profile]) => profile.standard.target === backend && profile.standard.model === row.id);
-    if (existing && !shared && (!row.reasoning_models || existing[1].standard.reasoning_models)) { selectProfile(index,existing[0]); return; }
+    const existing = eligible.find(([,profile]) => matches(profile.standard));
+    if (existing && !shared) { selectProfile(index,existing[0]); return; }
     const id = shared ? item.profile : `command-model-${crypto.randomUUID().replaceAll('-','')}`;
     const profile = {standard:catalogDestination(config,backend,row)};
     setProfiles(old=>({...old,[id]:profile}));
@@ -192,12 +198,12 @@ export function CommandEditor({ editor, config, appliedConfig, revision, configP
       <Field label="命令名称"><input value={name} onChange={event => setName(event.target.value)}/></Field>
       <Field label="显示说明"><input value={value.label || ''} onChange={event => set('label',event.target.value)}/></Field>
       <Field label="启动方式"><select value={value.template} onChange={event => setValue(old => ({...old,template:event.target.value,options:{},mod_profile:config.management.templates[event.target.value]?.supports_mods ? old.mod_profile : undefined}))}>{Object.entries(config.management.templates).map(([id,template]) => <option key={id} value={id}>{template.label}</option>)}</select></Field>
-      {subscription && <Field label="接入方式"><select value={value.options?.['auth-mode'] || template.options?.['auth-mode']?.default || 'api'} onChange={event => setValue(old => ({...old,options:{...old.options,'auth-mode':event.target.value}}))}><option value="api">API · 使用配置的服务与模型</option><option value="account">账号 · 官方订阅与备用账号</option></select></Field>}
+      {subscription && <Field label="接入方式"><select value={value.options?.['auth-mode'] || template.options?.['auth-mode']?.default || 'api'} onChange={event => setValue(old => ({...old,options:{...old.options,'auth-mode':event.target.value}}))}><option value="api">API · 使用配置的服务与模型</option><option value="account">账号 · 官方订阅与账号切换</option></select></Field>}
       {!subscriptionMode && <Field label={accountEnabled || subscription ? 'API 默认启动模型' : '默认启动模型'} hint={transcription ? '与语音转写页面的默认模型同步。' : accountMode ? '此选择保留给 API 模式；账号模式在 Codex 内选择官方模型。' : '跟随启动器时，保留此命令的现有默认选择。'}>
         {transcription ? <input disabled value={config.management.transcription?.default_model || '尚未配置'}/> : bindings.length ? <select disabled={accountMode} value={value.model || ''} onChange={event => set('model',event.target.value || null)}><option value="">跟随客户端或启动器</option>{bindings.filter(item => item.visible).map(item => <option key={item.id} value={item.model}>{label(item)}</option>)}</select> : <input disabled={accountMode} value={value.model || ''} onChange={event => set('model',event.target.value || null)} placeholder="跟随客户端或启动器"/>}
       </Field>}
     </div>
-    {subscriptionMode && <SubscriptionAccounts name={name} value={value} setValue={setValue} template={template} appliedConfig={appliedConfig} revision={revision} configPath={configPath} api={api} ui={ui}/>}
+    {subscription && (subscriptionMode || editor.showAccounts) && <SubscriptionAccounts name={name} value={value} setValue={setValue} template={template} appliedConfig={appliedConfig} revision={revision} configPath={configPath} api={api} ui={ui}/>}
     {Object.entries(template?.options || {}).filter(([key]) => !(subscription && key === 'auth-mode') && !(subscriptionMode && key === 'router-speed') && (!accountMode || key !== 'service-tier')).map(([key,option]) => <Field key={key} label={option.label} hint={key === 'auth-mode' ? '设置默认启动模式；终端也可使用 --router-mode api 或 --router-mode account 临时选择。' : key === 'router-speed' && !bindings.length ? '在可选模型中添加模型后，可以选择 Router 服务等级。' : undefined}><select disabled={key === 'router-speed' && !bindings.length} value={value.options?.[key] || option.default} onChange={event => setValue(old => ({...old,options:{...old.options,[key]:event.target.value}}))}>{Object.entries(option.choices).map(([id,choice]) => <option key={id} value={id}>{choice.label}</option>)}</select></Field>)}
     {accountEnabled && <section className="form-section"><h3>独立账号登录</h3><Field label="账号配置与凭据目录" hint="此目录保存该入口的登录凭据、配置与会话。使用独立目录即可同时保留其他账号。"><input value={accountHome} onChange={event => setValue(old => ({...old,env:{...old.env,ROUTER_CODEX_ACCOUNT_HOME:event.target.value}}))}/></Field><p className="muted">首次登录：<code>{name || '命令名称'} --router-mode account login</code>；查看登录状态：<code>{name || '命令名称'} --router-mode account login status</code>。账号模式的模型与 Fast 在 Codex 内选择，API 模型配置会保留。</p></section>}
     {template?.request_path && !accountMode && !subscriptionMode && <section className="command-model-editor"><header><div><h3>可选模型 <span>{bindings.length}</span></h3><p>显示名称留空时跟随后端模型。菜单、切换提示与状态名称使用同一份配置。</p></div><div>{discoveryEnabled && <Button disabled={loadingLimits} onClick={() => loadContextLimits(true)}>刷新模型上限</Button>}<Button onClick={add}>＋ 添加模型</Button></div></header>
@@ -208,7 +214,7 @@ export function CommandEditor({ editor, config, appliedConfig, revision, configP
           <div><Field label={`模型 ${index+1} 的 API 后端`}><select value={target?.target || ''} onChange={event => { const found = eligible.find(([,profile]) => profile.standard.target === event.target.value); if (found) selectProfile(index,found[0]); else customize(index,next => { next.standard = {target:event.target.value,model:''}; delete next.fast; }); }}>{backends.map(id => <option key={id} value={id}>{config.management.labels?.[`backend:${id}`] || id}</option>)}</select></Field>
           <Field label={`模型 ${index+1} 的替换范围`}><select value={scopes[item.id] || 'local'} onChange={e=>setScopes(old=>({...old,[item.id]:e.target.value}))}><option value="local">仅此命令入口</option><option value="shared">共享配置的全部关联入口</option></select></Field>
           {scopes[item.id] === 'shared' && <p className="catalog-impact">将修改：{profileUsages(config,item.profile).map(usage=>usage.command || usage.integration || usage.route).filter((v,i,a)=>a.indexOf(v)===i).join('、') || name}。</p>}</div>
-          <CatalogSelect backend={target?.target} value={target?.model} label={`模型 ${index+1} 的模型`} onSelect={row=>selectRemote(index,row,target.target)} savedProfiles={eligible.filter(([,p])=>p.standard.target===target?.target).map(([id,p])=>({id,label:config.management.labels?.[`profile:${id}`] || p.standard.model}))} onProfile={id=>selectProfile(index,id)}/>
+          <CatalogSelect backend={target?.target} value={target?.model} label={`模型 ${index+1} 的模型`} onSelect={row=>selectRemote(index,row,target.target)} savedProfiles={eligible.filter(([,p])=>p.standard.target===target?.target).map(([id,p])=>({id,label:config.management.labels?.[`profile:${id}`] || p.standard.reasoning_models?.label || p.standard.model}))} onProfile={id=>selectProfile(index,id)}/>
           {config.management.model_catalogs?.[target?.target]?.providers && <ProviderSelect backend={target.target} model={target.model} value={target.provider} label={`模型 ${index+1} 的供应商`} onChange={value=>customize(index,next=>{if(value)next.standard.provider=value;else delete next.standard.provider;})}/>}
           <Field label={`模型 ${index+1} 的显示名称`} hint="留空时自动跟随当前 API 模型。"><input value={item.label || ''} placeholder={modelLabel(config,{...item,label:''},allProfiles)} onChange={event => update(index,{label:event.target.value})}/></Field>
           <Field label={`模型 ${index+1} 的菜单说明`}><input value={item.description || ''} placeholder="自动显示模型与服务来源" onChange={event => update(index,{description:event.target.value})}/></Field>

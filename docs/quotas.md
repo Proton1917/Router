@@ -1,6 +1,8 @@
 # 账号配额
 
-在 Router 控制台打开 **服务与额度 → 账号配额**，查看 Antigravity 和 Grok 的剩余额度、重置时间及最近更新时间。桌面应用和 `router web` 使用同一个页面。
+在 Router 控制台打开 **服务与额度 → 账号与额度**。Claude Code 官方订阅、Grok、Antigravity 和其他已配置服务的账号共用同一组卡片，每张卡片直接显示对应账号的剩余额度和重置时间。桌面应用和 `router web` 使用同一个页面。
+
+Claude Code 卡片显示启动命令、登录状态和订阅类型。“管理账号”进入该命令的官方订阅设置，可添加账号、调整优先顺序或切换正在运行的会话。账号模式的交互会话收到模型响应后，官方状态栏可提供五小时和每周的用量及重置时间。Router 将最近报告的额度与账号身份关联，页面显示记录时间，过期窗口显示“等待更新”。“读取额度”读取本机记录，新的额度由后续会话响应带来。Grok 和 Antigravity 卡片的“刷新配额”查询对应服务商接口。
 
 页面打开时读取配额，可见期间按来源配置的间隔刷新；离开页面或隐藏窗口后停止定时请求。点击“刷新配额”立即查询。后台在内存中缓存结果，并合并同一来源的并发查询。查询失败时保留上次成功的数据并显示错误和更新时间；没有历史结果时显示查询失败。配额查询与模型转发分别执行。
 
@@ -20,15 +22,15 @@ Antigravity 的分组由上游返回，当前包括 Gemini、Claude / GPT、Gemi
 | `timeout_seconds` | 授权读取、适配程序各自的超时上限，1–120 秒 |
 | `settings` | 传给适配程序的接口地址、请求头及供应商参数 |
 
-参照 [配额配置示例](../router-rs/examples/quotas.json)，将来源对象合并进已有管理配置。示例中的凭据路径和后端 ID 需要换成实际值。复制 `scripts/provider-quota.py` 到部署目录的 `scripts/`，配置 Python 3 路径。修改来源参数后由下一次查询读取。
+参照 [配额配置示例](../router-rs/examples/quotas.json)，将来源对象合并进已有管理配置。`provider-quota.py` 负责请求与错误处理，`settings.mapper` 可以指定转换 Python 模块。模块的 `normalize(settings, payload, percent)` 接收上游数据，返回后文的通用配额格式。输出本身采用此格式的接口可以直接接入。`mapper` 路径相对于 Router 配置文件目录。
 
-Antigravity 适配程序读取现有桥接服务管理的凭据文件，令牌续期由该桥接服务负责。`credential_file` 指向仓库之外的现用凭据。Grok 使用 `auth_backend` 引用 Router 的 OAuth 后端，标准和 Fast 后端共享同一授权时只配置一份配额来源。
+桥接 OAuth 来源设置 `settings.bridge`，其中包含本机管理 `base_url`、`provider` 和 `token_file`。配额程序按所选账号调用桥接服务的 `api-call`，由桥接服务读取和续期令牌。上游返回 401 时，桥接服务对该账号续期一次并重试查询。`credential_file` 用于定位对应账号。Grok 使用 `auth_backend` 引用 Router 的 OAuth 后端，标准和 Fast 后端共享同一授权时只配置一份配额来源。
 
-`settings.proxy_url` 可指定 HTTP 代理；空字符串表示直连，省略时采用 Python 的系统或环境代理。后台服务应配置能够访问供应商接口的网络出口。Antigravity 桥接服务的 OAuth 刷新与模型请求使用其自身 `requests.proxy-url` 设置。
+直连额度接口时，`settings.proxy_url` 选择 HTTP 代理，空字符串表示直连，省略时采用 Python 的系统或环境代理。通过桥接服务查询额度时，OAuth 续期、模型和配额请求都使用桥接服务的 `requests.proxy-url`。
 
 ## 适配接口
 
-管理接口为 `POST /api/quotas/read`，请求正文是 `{"id":"来源 ID","refresh":false}`，使用控制台现有认证。返回 `data`、`updated_at`（Unix 秒）、`error`、`stale`、`ttl_seconds`。`refresh:true` 忽略已完成的缓存；同时发起的同源刷新共享结果。
+管理接口为 `POST /api/quotas/read`，请求包含来源 `id`、可选账号 `account` 和 `refresh`，使用控制台现有认证。返回 `data`、`updated_at`（Unix 秒）、`error`、`stale`、`ttl_seconds`。缓存按来源和账号保存。`refresh:true` 跳过已完成的缓存，同一账号同时发起的刷新共享结果。
 
 适配程序从标准输入读取 `settings`、可选 `token` 和 `config_directory`，通过标准输出返回 JSON。令牌只传入子进程的标准输入。适配程序输出最多 256 KiB；只将以下结构化字段提供给前端：
 

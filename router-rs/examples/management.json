@@ -27,7 +27,7 @@
     "messages-client": {
       "label": "Claude Code · API / 账号",
       "supports_mods": true,
-      "description": "选择 API 服务或官方订阅账号，分别保存模型和主备账号设置。",
+      "description": "选择 API 服务或官方订阅账号，分别保存模型和账号设置。",
       "program": "python3",
       "deferred": true,
       "deferred_model_env": "ROUTER_DEFAULT_API_MODEL",
@@ -44,7 +44,7 @@
           "default": "api",
           "choices": {
             "api": {"label":"API · 使用配置的服务与模型", "args":[]},
-            "account": {"label":"账号 · 官方订阅与备用账号", "args":[]}
+            "account": {"label":"账号 · 官方订阅与账号切换", "args":[]}
           }
         },
         "router-speed": {

@@ -1,11 +1,10 @@
-from http.client import HTTPConnection
 from itertools import count
 import json
 from pathlib import Path
 import re
 import subprocess
 import sys
-from urllib.parse import urlsplit
+from router_control import RouterControl
 
 
 def catalog_entries(models, variants):
@@ -90,34 +89,15 @@ def register(config, backend, models, rules):
 
 
 def control(config_path, settings, backend, models):
-    manager = json.loads(config_path.read_text())['management']
-    address = urlsplit('http://' + manager['listen'])
-    if address.hostname not in ('127.0.0.1', 'localhost', '::1') or address.netloc != manager['listen']:
-        raise ValueError('模型登记使用本机回环管理地址')
-    token_path = config_path.parent / Path(manager['token_file'])
-    headers = {'Authorization': 'Bearer ' + token_path.read_text().strip(), 'Content-Type': 'application/json'}
-    connection = HTTPConnection(address.hostname, address.port, timeout=20)
-
-    def request(method, endpoint, body=None):
-        payload = json.dumps(body).encode() if body is not None else None
-        connection.request(method, '/api/' + endpoint, payload, headers)
-        response = connection.getresponse()
-        data = json.load(response)
-        if response.status >= 300:
-            raise RuntimeError(f'Router {endpoint} 返回 HTTP {response.status}：{data.get("error", "")}')
-        return data
-
-    try:
-        state = request('GET', 'state')
+    with RouterControl(config_path, json.loads(config_path.read_text())) as router:
+        state = router.request('state')
         config = state['config']
         rules = config['management']['model_catalogs'][backend]['update_settings'].get('register', [])
         if rules != settings['register']:
             return
         if added := register(config, backend, models, rules):
-            request('POST', 'apply', {'revision': state['revision'], 'config': config})
+            router.request('apply', {'revision': state['revision'], 'config': config})
             print(json.dumps({'added': added}, ensure_ascii=False))
-    finally:
-        connection.close()
 
 
 def main():

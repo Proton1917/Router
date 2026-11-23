@@ -37,6 +37,8 @@ pub struct Settings {
     pub token_url: String,
     #[serde(default)]
     pub authorization_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub userinfo_url: Option<String>,
     #[serde(default)]
     pub device_authorization_url: Option<String>,
     #[serde(default)]
@@ -93,6 +95,9 @@ impl Settings {
             "请填写服务商名称和 Client ID"
         );
         endpoint(&self.token_url)?;
+        if let Some(url) = &self.userinfo_url {
+            endpoint(url)?;
+        }
         ensure!(
             !self.credential_file.trim().is_empty(),
             "OAuth 凭据文件路径不能为空"
@@ -227,6 +232,59 @@ struct Credential {
     expires_at: Option<u64>,
     scopes: Vec<String>,
     updated_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    identity: Option<Identity>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub(crate) struct Identity {
+    pub sub: String,
+    pub email: Option<String>,
+}
+
+pub(crate) async fn identify(url: &str, token: &str) -> Result<Identity> {
+    let identity: Identity = http_client()?
+        .get(endpoint(url)?)
+        .bearer_auth(token)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await
+        .context("账号身份响应格式错误")?;
+    ensure!(!identity.sub.is_empty(), "授权响应缺少账号标识");
+    Ok(identity)
+}
+
+pub(crate) async fn identity_endpoint(settings: &Settings) -> Result<Option<String>> {
+    if let Some(url) = &settings.userinfo_url {
+        return Ok(Some(url.clone()));
+    }
+    if !settings.scopes.iter().any(|scope| scope == "openid") {
+        return Ok(None);
+    }
+    let url = endpoint(&settings.token_url)?.join("/.well-known/openid-configuration")?;
+    let config: Value = http_client()?
+        .get(url)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    Ok(config["userinfo_endpoint"].as_str().map(str::to_owned))
+}
+
+pub(crate) fn stored_identity(settings: &Settings) -> Option<Identity> {
+    read_credential(settings).ok()?.identity
+}
+
+pub(crate) fn credential_status(settings: &Settings) -> Value {
+    match read_credential(settings) {
+        Ok(c) => {
+            json!({"authenticated":c.expires_at.is_none_or(|e| e > now()), "can_refresh":c.refresh_token.is_some(), "expires_at":c.expires_at,"updated_at":c.updated_at,"scopes":c.scopes})
+        }
+        Err(_) => json!({"authenticated":false}),
+    }
 }
 
 fn credential_directory(settings: &Settings) -> Result<PathBuf> {
@@ -294,6 +352,7 @@ fn save_token(
     settings: &Settings,
     token: BasicTokenResponse,
     previous_refresh: Option<String>,
+    identity: Option<Identity>,
 ) -> Result<Credential> {
     ensure!(
         !token.access_token().secret().is_empty(),
@@ -315,6 +374,7 @@ fn save_token(
             .map(|s| s.iter().map(|s| s.to_string()).collect())
             .unwrap_or_else(|| settings.scopes.clone()),
         updated_at: now(),
+        identity,
     };
     let directory = credential_directory(settings)?;
     let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
@@ -325,6 +385,26 @@ fn save_token(
         .persist(&settings.credential_file)
         .map_err(|e| e.error)?;
     Ok(credential)
+}
+
+pub(crate) async fn save_login(
+    settings: &Settings,
+    token: BasicTokenResponse,
+    identity: Option<Identity>,
+) -> Result<()> {
+    let _lock = credential_lock(settings).await?;
+    let previous = identity
+        .as_ref()
+        .and_then(|identity| {
+            read_credential(settings).ok().filter(|c| {
+                c.identity
+                    .as_ref()
+                    .is_some_and(|old| old.sub == identity.sub)
+            })
+        })
+        .and_then(|c| c.refresh_token);
+    save_token(settings, token, previous, identity)?;
+    Ok(())
 }
 
 pub async fn access_token(settings: &Settings) -> Result<String> {
@@ -360,7 +440,7 @@ async fn refresh(settings: &Settings, credential: Credential) -> Result<String> 
         .request_async(&http_client()?)
         .await
         .map_err(exchange_error)?;
-    Ok(save_token(settings, token, Some(refresh))?.access_token)
+    Ok(save_token(settings, token, Some(refresh), credential.identity)?.access_token)
 }
 
 struct Session {
@@ -372,6 +452,80 @@ struct Session {
 fn sessions() -> &'static Mutex<BTreeMap<String, Session>> {
     static SESSIONS: OnceLock<Mutex<BTreeMap<String, Session>>> = OnceLock::new();
     SESSIONS.get_or_init(Mutex::default)
+}
+
+pub(crate) async fn login_status(key: &str) -> Option<Value> {
+    sessions()
+        .lock()
+        .await
+        .get(key)
+        .map(|session| session.status.clone())
+}
+
+pub(crate) async fn cancel_login(key: &str) {
+    if let Some(session) = sessions().lock().await.remove(key) {
+        session.task.abort();
+    }
+}
+
+pub(crate) async fn start_login<F, Fut>(
+    key: String,
+    settings: &Settings,
+    finish: F,
+) -> Result<Value>
+where
+    F: FnOnce(BasicTokenResponse) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<()>> + Send + 'static,
+{
+    let mut guard = sessions().lock().await;
+    guard.retain(|_, session| {
+        !session.task.is_finished() || now().saturating_sub(session.started_at) < 3600
+    });
+    if let Some(session) = guard.get(&key)
+        && session.status["state"] == "pending"
+    {
+        return Ok(session.status.clone());
+    }
+    let (status, pending) = prepare(settings).await?;
+    let target = key.clone();
+    let timeout = Duration::from_secs(settings.login_timeout_seconds);
+    let task = tokio::spawn(async move {
+        let result = tokio::time::timeout(timeout, async { finish(pending.await?).await }).await;
+        let status = match result {
+            Ok(Ok(())) => json!({"state":"success"}),
+            Ok(Err(error)) => json!({"state":"error", "message":error.to_string()}),
+            Err(_) => json!({"state":"expired", "message":"授权等待时间已结束，请重新登录"}),
+        };
+        let mut guard = sessions().lock().await;
+        if let Some(session) = guard.get_mut(&target)
+            && session.task.id() == tokio::task::id()
+        {
+            session.status = status;
+        }
+    });
+    guard.insert(
+        key,
+        Session {
+            status: status.clone(),
+            task: task.abort_handle(),
+            started_at: now(),
+        },
+    );
+    Ok(status)
+}
+
+pub(crate) async fn open_browser(browser: &control::ProcessSpec, url: &str) -> Result<bool> {
+    let context = json!({"url":url});
+    let mut command = tokio::process::Command::new(control::render(&browser.program, &context)?);
+    for argument in &browser.args {
+        command.arg(control::render(argument, &context)?);
+    }
+    Ok(command
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await
+        .is_ok_and(|status| status.success()))
 }
 
 type PendingToken = BoxFuture<'static, Result<BasicTokenResponse>>;
@@ -536,82 +690,26 @@ async fn action(
         .context("请先保存并应用此后端的 OAuth 配置")?;
     let key = settings.credential_file.clone();
     match request.action.as_str() {
-        "status" => {
-            let sessions = sessions().lock().await;
-            let pending = sessions.get(&key).map(|s| s.status.clone());
-            let credential = match read_credential(&settings) {
-                Ok(c) => {
-                    json!({"authenticated":c.expires_at.is_none_or(|e| e > now()), "can_refresh":c.refresh_token.is_some(), "expires_at":c.expires_at,"updated_at":c.updated_at,"scopes":c.scopes})
-                }
-                Err(_) => json!({"authenticated":false}),
-            };
-            Ok(Json(
-                json!({"provider":settings.provider,"credential":credential,"session":pending}),
-            ))
-        }
+        "status" => Ok(Json(
+            json!({"provider":settings.provider,"credential":credential_status(&settings),"session":login_status(&key).await}),
+        )),
         "login" => {
             credential_directory(&settings)?;
-            let mut guard = sessions().lock().await;
-            guard.retain(|_, session| {
-                !session.task.is_finished() || now().saturating_sub(session.started_at) < 3600
-            });
-            if let Some(session) = guard.get(&key)
-                && !session.task.is_finished()
-            {
-                return Err(anyhow::anyhow!("此账号已有登录流程，请完成或取消后重新登录").into());
-            }
-            let (status, pending) = prepare(&settings).await?;
-            let target = key.clone();
-            let task = tokio::spawn(async move {
-                let result = tokio::time::timeout(
-                    Duration::from_secs(settings.login_timeout_seconds),
-                    async {
-                        let token = pending.await?;
-                        let _lock = credential_lock(&settings).await?;
-                        save_token(&settings, token, None)?;
-                        Ok::<_, anyhow::Error>(())
-                    },
-                )
-                .await;
-                let status = match result {
-                    Ok(Ok(())) => json!({"state":"success"}),
-                    Ok(Err(error)) => json!({"state":"error", "message":error.to_string()}),
-                    Err(_) => {
-                        json!({"state":"expired", "message":"授权等待时间已结束，请重新登录"})
-                    }
-                };
-                if let Some(session) = sessions().lock().await.get_mut(&target) {
-                    session.status = status;
-                }
-            });
-            guard.insert(
-                key,
-                Session {
-                    status: status.clone(),
-                    task: task.abort_handle(),
-                    started_at: now(),
-                },
-            );
-            drop(guard);
+            let output = settings.clone();
+            let status = start_login(key, &settings, move |token| async move {
+                save_login(&output, token, None).await
+            })
+            .await?;
             let manager = control::management(&control::load_value(&state.path)?)?;
-            let context = json!({"url":status["url"]});
-            let mut browser =
-                tokio::process::Command::new(control::render(&manager.browser.program, &context)?);
-            for arg in &manager.browser.args {
-                browser.arg(control::render(arg, &context)?);
-            }
-            let opened = browser
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .await
-                .is_ok_and(|s| s.success());
+            let opened = open_browser(
+                &manager.browser,
+                status["url"].as_str().context("授权地址缺失")?,
+            )
+            .await?;
             Ok(Json(json!({"session":status,"browser_opened":opened})))
         }
         "cancel" | "logout" => {
-            if let Some(session) = sessions().lock().await.remove(&key) {
-                session.task.abort();
-            }
+            cancel_login(&key).await;
             if request.action == "logout" {
                 let _lock = credential_lock(&settings).await?;
                 match fs::remove_file(&settings.credential_file) {

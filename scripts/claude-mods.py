@@ -88,7 +88,7 @@ def prepare(mods, profile_id, args):
 
 
 def launch():
-    config_path, command_name, separator, program, *args = sys.argv[2:]
+    router, config_path, command_name, separator, program, *args = sys.argv[2:]
     if separator != "--":
         raise ValueError("缺少客户端参数分隔符")
     config = read_json(config_path)
@@ -115,7 +115,7 @@ def launch():
                 child.send_signal(signum)
         signal.signal(signal.SIGTERM, forward)
         signal.signal(signal.SIGHUP, forward)
-        child = subprocess.Popen([program, "--settings", temporary, *args])
+        child = subprocess.Popen([router, '__client-exec', program, "--settings", temporary, *args])
         if pending_signal is not None:
             child.send_signal(pending_signal)
         code = child.wait()

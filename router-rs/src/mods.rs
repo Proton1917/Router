@@ -101,6 +101,7 @@ pub fn wrap(
         .collect::<Result<Vec<_>>>()?;
     wrapped.extend([
         "launch".to_owned(),
+        std::env::current_exe()?.to_string_lossy().into_owned(),
         path.to_string_lossy().into_owned(),
         name.to_owned(),
         "--".to_owned(),

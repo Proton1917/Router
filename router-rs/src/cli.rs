@@ -17,6 +17,7 @@ use crate::{
 
 pub async fn dispatch(path: &Path, command: RouterCommand) -> Result<()> {
     match command {
+        RouterCommand::ClientExec { .. } => unreachable!("handled before config loading"),
         RouterCommand::OauthToken { .. } => unreachable!("handled before config loading"),
         RouterCommand::Serve => unreachable!("serve is handled by main"),
         RouterCommand::Web { no_open, restart } => {
@@ -643,8 +644,16 @@ fn execute_client(
     ))
 }
 
+pub fn exec_client(program: &str, args: &[String]) -> Result<()> {
+    replace_process(Command::new(program).args(args))
+}
+
 fn replace_process(command: &mut Command) -> Result<()> {
-    #[cfg(unix)]
+    #[cfg(target_os = "macos")]
+    {
+        Err(crate::client_process::exec(command)).context("无法启动客户端")
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
     {
         use std::os::unix::process::CommandExt;
         Err(command.exec()).context("无法启动客户端")

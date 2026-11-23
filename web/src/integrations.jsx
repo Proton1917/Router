@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { CatalogSelect, ReasoningControls, catalogDestination } from './catalogs.jsx';
+import { catalogModelMatches } from './reasoning-models.js';
 import { profileUsages } from './model-ownership.js';
 
 export function IntegrationWorkspace({ config, revision, dirty, api, onEdit, onCommand, ui }) {
@@ -23,7 +24,7 @@ export function IntegrationWorkspace({ config, revision, dirty, api, onEdit, onC
       const visible = (spec.slots || []).filter(slot => slot.visible);
       const modelRow = slot => {
         const profile = config.profiles[slot.profile];
-        return <div key={slot.id}><span>{slot.label || config.management.labels?.[`profile:${slot.profile}`] || profile?.standard.model}</span><small>{config.management.labels?.[`backend:${profile?.standard.target}`] || profile?.standard.target}{profile?.standard.provider ? ` · ${profile.standard.provider}` : ''}</small></div>;
+        return <div key={slot.id}><span>{slot.label || config.management.labels?.[`profile:${slot.profile}`] || profile?.standard.reasoning_models?.label || profile?.standard.model}</span><small>{config.management.labels?.[`backend:${profile?.standard.target}`] || profile?.standard.target}{profile?.standard.provider ? ` · ${profile.standard.provider}` : ''}</small></div>;
       };
       return <article className="integration-card" key={id}>
         <header><span className="integration-number">{String(index + 1).padStart(2, '0')}</span><span className={`status-pill ${report?.configured ? '' : 'offline'}`}><i/>{working[id] ? '正在检查' : report?.configured ? '配置已接入' : report?.error ? '需要处理' : '待接入'}</span></header>
@@ -55,12 +56,12 @@ export function IntegrationEditor({ id, config, close, save, onCommand, ui }) {
     return profile.standard.model && (!protocols || protocols.includes(spec.protocol));
   });
   const backends = Object.entries(config.runtime.backends).filter(([key]) => !config.management.backend_protocols?.[key] || config.management.backend_protocols[key].includes(spec.protocol));
-  const label = key => profileLabels[key] || config.management.labels?.[`profile:${key}`] || allProfiles[key]?.standard.model || key;
+  const label = key => profileLabels[key] || config.management.labels?.[`profile:${key}`] || allProfiles[key]?.standard.reasoning_models?.label || allProfiles[key]?.standard.model || key;
   function slot(index, changes) { setSpec(old => ({ ...old, slots: old.slots.map((value, at) => at === index ? { ...value, ...changes } : value) })); }
   function remote(index, row, backend) {
     const item = spec.slots[index];
     const shared = scopes[item.id] === 'shared';
-    const existing = profiles.find(([,profile])=>profile.standard.target===backend && profile.standard.model===row.id);
+    const existing = profiles.find(([,profile])=>profile.standard.target===backend && catalogModelMatches(row,profile.standard.model));
     if (existing && !shared && (!row.reasoning_models || existing[1].standard.reasoning_models)) { slot(index,{profile:existing[0],label:''}); return; }
     const key = shared ? item.profile : `command-model-${crypto.randomUUID().replaceAll('-','')}`;
     setExtraProfiles(old=>({...old,[key]:{standard:catalogDestination(config,backend,row)}}));

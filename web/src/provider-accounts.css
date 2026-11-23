@@ -1,0 +1,7 @@
+.provider-account-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.quota-card footer .provider-account-actions { margin-top: 12px; }
+.quota-card header .provider-account-identity { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.provider-account-identity .subtle-badge { padding: 3px 6px; }
+.provider-login { padding: 14px; margin-top: 16px; border: 1px solid var(--line); border-radius: 12px; }
+.provider-login strong { display: block; margin-bottom: 10px; }
+.provider-login p { font-size: 13px; }

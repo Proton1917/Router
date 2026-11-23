@@ -18,13 +18,17 @@ use serde_json::Value;
 mod body;
 mod catalogs;
 mod cli;
+#[cfg(target_os = "macos")]
+mod client_process;
 mod command_models;
 mod context_limits;
 mod control;
 mod integrations;
 mod mods;
 mod oauth;
+mod oauth_accounts;
 mod prepare;
+mod provider_accounts;
 mod quotas;
 mod routing;
 mod runtime;
@@ -57,6 +61,9 @@ struct ClientSettings {
 #[tokio::main]
 async fn main() -> Result<()> {
     let arguments = Arguments::parse();
+    if let Some(server::RouterCommand::ClientExec { program, args }) = &arguments.command {
+        return cli::exec_client(program, args);
+    }
     if let Some(server::RouterCommand::OauthToken { settings }) = &arguments.command {
         let settings: oauth::Settings = serde_json::from_str(settings)?;
         settings.validate()?;
@@ -290,6 +297,7 @@ async fn proxy_inner(
         && protocol != Protocol::Models
         && let Some(route) =
             transparent_route(runtime_config, &client.id, &headers, &client_settings)?
+        && oauth_accounts::for_backend(runtime_config, &route.target).is_none()
     {
         return forward_streaming(
             &state,
@@ -374,9 +382,6 @@ async fn proxy_inner(
         resolved_route,
         &runtime_config.runtime.strip_request_headers,
     );
-    if let Some(auth) = &backend.auth {
-        builder = apply_backend_auth(builder, auth).await?;
-    }
     for (name, value) in &resolved_route.header_policy.set {
         builder = builder.header(name, value);
     }
@@ -386,12 +391,26 @@ async fn proxy_inner(
             .header(&cache.request_ttl_header, ttl.to_string());
     }
 
-    let upstream = builder
-        .header("content-length", prepared.body.len)
-        .body(prepared.body.into_http_body().await?)
-        .send()
-        .await
-        .context("failed to send upstream request")?;
+    let builder = builder.header("content-length", prepared.body.len);
+    let upstream = if let Some(pool) = oauth_accounts::for_backend(runtime_config, target) {
+        send_with_oauth_accounts(
+            builder,
+            backend.auth.as_ref().expect("OAuth backend"),
+            &pool,
+            prepared.body,
+        )
+        .await?
+    } else {
+        let mut builder = builder;
+        if let Some(auth) = &backend.auth {
+            builder = apply_backend_auth(builder, auth).await?;
+        }
+        builder
+            .body(prepared.body.into_http_body().await?)
+            .send()
+            .await
+            .context("failed to send upstream request")?
+    };
 
     let status = upstream.status();
     let mut upstream_headers = upstream.headers().clone();
@@ -505,7 +524,7 @@ async fn proxy_inner(
 }
 
 async fn apply_backend_auth(
-    mut builder: reqwest::RequestBuilder,
+    builder: reqwest::RequestBuilder,
     auth: &AuthConfig,
 ) -> Result<reqwest::RequestBuilder> {
     let result = read_backend_token(auth).await;
@@ -513,10 +532,68 @@ async fn apply_backend_auth(
         Some(hint) => result.with_context(|| hint.clone())?,
         None => result?,
     };
+    Ok(with_token(builder, auth, &token))
+}
+
+fn with_token(
+    mut builder: reqwest::RequestBuilder,
+    auth: &AuthConfig,
+    token: &str,
+) -> reqwest::RequestBuilder {
     for (name, template) in &auth.headers {
         builder = builder.header(name, template.replace("{token}", token.trim()));
     }
-    Ok(builder)
+    builder
+}
+
+async fn send_with_oauth_accounts(
+    builder: reqwest::RequestBuilder,
+    auth: &AuthConfig,
+    pool: &oauth_accounts::Pool<'_>,
+    body: body::JsonBody,
+) -> Result<reqwest::Response> {
+    let accounts = pool.ordered()?;
+    if accounts.len() <= 1 {
+        let token = match accounts.first() {
+            Some(account) => oauth::access_token(account).await,
+            None => oauth::access_token(pool.settings).await,
+        }
+        .with_context(|| {
+            auth.error_hint
+                .clone()
+                .unwrap_or_else(|| "读取 OAuth 账号授权失败".to_owned())
+        })?;
+        return Ok(with_token(builder, auth, &token)
+            .body(body.into_http_body().await?)
+            .send()
+            .await?);
+    }
+    let mut rejected = None;
+    let mut auth_error = None;
+    for account in &accounts {
+        let token = match oauth::access_token(account).await {
+            Ok(token) => token,
+            Err(error) => {
+                auth_error = Some(error);
+                continue;
+            }
+        };
+        let attempt = builder.try_clone().context("无法重建 OAuth 请求")?;
+        let response = with_token(attempt, auth, &token)
+            .body(body.replay_body())
+            .send()
+            .await?;
+        if !matches!(
+            response.status(),
+            StatusCode::TOO_MANY_REQUESTS | StatusCode::UNAUTHORIZED
+        ) {
+            return Ok(response);
+        }
+        if rejected.is_none() {
+            rejected = Some(response);
+        }
+    }
+    rejected.ok_or_else(|| auth_error.unwrap_or_else(|| anyhow::anyhow!("OAuth 账号授权暂不可用")))
 }
 
 async fn read_backend_token(auth: &AuthConfig) -> Result<String> {
@@ -526,7 +603,9 @@ async fn read_backend_token(auth: &AuthConfig) -> Result<String> {
     } else if let Some(path) = &auth.token_file {
         fs::read_to_string(path).context("failed to read configured credential file")?
     } else if let Some(settings) = &auth.oauth {
-        oauth::access_token(settings).await?
+        oauth_accounts::Pool::from_settings(settings)
+            .available_token()
+            .await?
     } else {
         let output = tokio::process::Command::new(&auth.token_command[0])
             .args(&auth.token_command[1..])

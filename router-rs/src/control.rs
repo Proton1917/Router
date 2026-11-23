@@ -182,11 +182,14 @@ pub struct Management {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub quota_sources: BTreeMap<String, crate::quotas::Source>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub account_providers: BTreeMap<String, crate::provider_accounts::Source>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub model_catalogs: BTreeMap<String, crate::catalogs::Source>,
 }
 
 impl Management {
     pub fn validate(&self) -> Result<()> {
+        crate::provider_accounts::validate(&self.account_providers, &self.quota_sources)?;
         if let Some(settings) = &self.transcription {
             settings.validate()?;
         }
@@ -711,6 +714,7 @@ pub(crate) struct ControlState {
     _watcher: Arc<std::sync::Mutex<notify::RecommendedWatcher>>,
     pub(crate) transcription: Arc<crate::transcription::Service>,
     pub(crate) quotas: Arc<crate::quotas::Service>,
+    pub(crate) account_updates: Arc<Mutex<()>>,
     pub(crate) catalogs: Arc<crate::catalogs::Service>,
 }
 
@@ -760,10 +764,11 @@ async fn protect(State(state): State<ControlState>, request: Request, next: Next
 
 async fn state(State(state): State<ControlState>) -> Result<Json<Value>, ApiError> {
     let value = load_value(&state.path)?;
-    crate::load_router_runtime_config(&state.path)?;
+    let config = crate::load_router_runtime_config(&state.path)?;
+    let providers = crate::provider_accounts::sources(&config);
     let restart_error = state.restart_error.lock().await.clone();
     Ok(Json(
-        json!({"config":value,"revision":revision(&value)?,"status":{"pid":std::process::id(),"restart_error":restart_error,"gateway_url":gateway_url(&value)?,"config_path":state.path.as_ref(),"version":env!("CARGO_PKG_VERSION")}}),
+        json!({"config":value,"revision":revision(&value)?,"status":{"pid":std::process::id(),"restart_error":restart_error,"gateway_url":gateway_url(&value)?,"config_path":state.path.as_ref(),"version":env!("CARGO_PKG_VERSION"),"account_providers":providers}}),
     ))
 }
 
@@ -1037,9 +1042,9 @@ async fn account_action(
 ) -> Result<Json<Value>, ApiError> {
     use tokio::io::AsyncWriteExt;
     let result: Result<Value> = async {
-    ensure!(["status", "login", "logout", "switch"].contains(&request.action.as_str()), "账号操作无效");
+    ensure!(["status", "overview", "login", "logout", "switch"].contains(&request.action.as_str()), "账号操作无效");
     let config = load_value(&state.path)?;
-    if request.action != "status" {
+    if !matches!(request.action.as_str(), "status" | "overview") {
         ensure!(request.revision.as_deref() == Some(&revision(&config)?), "请应用账号配置后再执行登录操作");
     }
     let manager = management(&config)?;
@@ -1050,7 +1055,7 @@ async fn account_action(
     for argument in &adapter.args { process.arg(render(argument, &context)?); }
     let (environment, removed) = crate::cli::env_plan(&config, &request.name, false)?;
     for key in removed { process.env_remove(key); }
-    process.envs(environment).env("ROUTER_CONFIG", state.path.as_ref()).env("ROUTER_COMMAND_NAME", &request.name);
+    process.envs(environment).env("ROUTER_CONFIG", state.path.as_ref()).env("ROUTER_COMMAND_NAME", &request.name).env("ROUTER_EXECUTABLE", std::env::current_exe()?);
     process.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(true);
     let mut child = process.spawn()?;
     let input = json!({"action":request.action,"account":request.account,"session":request.session});
@@ -1141,11 +1146,13 @@ pub async fn bind(
         _watcher: Arc::new(std::sync::Mutex::new(watcher)),
         transcription,
         quotas: Arc::new(crate::quotas::Service::default()),
+        account_updates: Arc::new(Mutex::new(())),
         catalogs,
     };
     let api = Router::new()
         .merge(crate::oauth::routes())
         .merge(crate::quotas::routes())
+        .merge(crate::provider_accounts::routes())
         .merge(crate::catalogs::routes())
         .merge(crate::transcription::routes())
         .route("/state", get(state))

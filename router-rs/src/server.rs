@@ -19,6 +19,13 @@ pub struct Arguments {
 
 #[derive(Debug, Subcommand)]
 pub enum RouterCommand {
+    /// 由适配程序将权限责任交给最终客户端
+    #[command(hide = true, name = "__client-exec")]
+    ClientExec {
+        program: String,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// 为本机适配程序读取 OAuth 凭据；输出包含访问令牌
     #[command(hide = true)]
     OauthToken {

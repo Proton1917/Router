@@ -1,4 +1,5 @@
 import fcntl
+from importlib.util import module_from_spec, spec_from_file_location
 import json
 import os
 import shutil
@@ -372,12 +373,13 @@ def main():
     work_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     with (work_directory / "integrations.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        kind = spec["settings"]["kind"]
-        if kind == "app_catalog":
-            return app_action(request)
-        if kind == "office_storage":
-            return office_action(request)
-        raise ValueError("未知客户端接入配置类型")
+        if adapter := spec["settings"].get("handler"):
+            path = Path(request["config_path"]).parent / Path(adapter).expanduser()
+            loader = spec_from_file_location("client_adapter", path)
+            handler = module_from_spec(loader)
+            loader.loader.exec_module(handler)
+            return handler.run(request, gateway_check)
+        return {"app_catalog": app_action, "office_storage": office_action}[spec["settings"]["kind"]](request)
 
 
 try:

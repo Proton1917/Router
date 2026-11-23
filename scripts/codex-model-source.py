@@ -1,94 +1,80 @@
 import copy
 import json
 import os
-import subprocess
-import sys
-import urllib.request
 from pathlib import Path
+import re
+import sys
 
-path = Path(sys.argv[1]).resolve()
-config = json.loads(path.read_text())
-command = config['management']['commands'][sys.argv[2]]
-native = json.loads(Path(sys.argv[3]).read_text())
-native_models = native['models']
-if not native_models:
-    raise ValueError('Codex 本机模型格式为空')
-default = min(native_models, key=lambda row: row.get('priority', 0))
-bindings = command.get('model_bindings') or [{'profile': command['profile']}]
-targets = {}
-for binding in bindings:
-    if binding.get('visible', True):
-        destination = config['profiles'][binding['profile']]['standard']
-        targets.setdefault(destination['target'], set()).add(destination['model'])
-models = {}
-for target, wanted in targets.items():
-    backend = config['runtime']['backends'][target]
-    auth = backend.get('auth', {})
-    headers = {}
-    if auth:
-        if auth.get('token_file'):
-            token_path = Path(auth['token_file'])
-            token = (token_path if token_path.is_absolute() else path.parent / token_path).read_text().strip()
-        elif auth.get('token_env'):
-            token = os.environ[auth['token_env']]
-        elif auth.get('token_command'):
-            token = subprocess.run(auth['token_command'], check=True, capture_output=True, text=True).stdout.strip()
-        elif auth.get('oauth'):
-            settings = dict(auth['oauth'])
-            for key in ('credential_file', 'client_secret_file'):
-                if settings.get(key) and not Path(settings[key]).is_absolute():
-                    settings[key] = str(path.parent / settings[key])
-            token = subprocess.run([os.environ['ROUTER_EXECUTABLE'], 'oauth-token', '--settings', json.dumps(settings)], check=True, capture_output=True, text=True, timeout=75).stdout.strip()
-        else:
-            raise ValueError('目录后端缺少凭据来源：' + target)
-        if not token:
-            raise ValueError('目录后端凭据为空：' + target)
-        headers = {name: value.format(token=token) for name, value in auth['headers'].items()}
-    url = backend['base_url'].rstrip('/') + os.environ.get('ROUTER_CODEX_CATALOG_PATH', '/v1/models')
-    request = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(request, timeout=30) as response:
-        catalog = json.load(response)
-    if not isinstance(catalog.get('data'), list):
-        raise ValueError('后端目录需要包含 data 数组：' + target)
-    found = {}
-    for row in catalog['data']:
-        if row.get('id') in wanted:
-            if row['id'] in found:
-                raise ValueError('后端目录模型标识重复：' + row['id'])
-            found[row['id']] = row
-    missing = wanted - found.keys()
-    if missing:
-        raise ValueError('后端目录缺少配置模型：' + ', '.join(sorted(missing)))
-    for identifier, row in found.items():
-        if identifier in models:
-            raise ValueError('不同后端使用相同目录模型标识：' + identifier)
-        preset = next((item for item in native_models if item['slug'] in (identifier, identifier.rsplit('/', 1)[-1])), default)
-        model = copy.deepcopy(preset)
-        model['slug'] = identifier
-        model['display_name'] = row.get('name') or identifier
-        model['description'] = row.get('description') or ''
-        context = row.get('context_length')
-        if not isinstance(context, int) or context <= 0:
-            raise ValueError('后端目录缺少有效上下文长度：' + identifier)
-        model['context_window'] = context
-        model['max_context_window'] = context
-        model['visibility'] = 'list'
-        model['supported_in_api'] = True
-        modalities = row.get('architecture', {}).get('input_modalities')
-        if not isinstance(modalities, list) or not modalities:
-            raise ValueError('后端目录缺少输入类型：' + identifier)
-        model['input_modalities'] = [item for item in modalities if item in ('text', 'image')]
-        if not model['input_modalities']:
-            raise ValueError('此模型没有 Codex 支持的输入类型：' + identifier)
-        parameters = row.get('supported_parameters')
-        if not isinstance(parameters, list):
-            raise ValueError('后端目录缺少支持参数：' + identifier)
-        if not any(item in parameters for item in ('reasoning', 'reasoning_effort')):
-            model['supported_reasoning_levels'] = []
-            model['default_reasoning_level'] = None
-        model['service_tiers'] = []
-        model['additional_speed_tiers'] = []
-        model['upgrade'] = None
-        model['availability_nux'] = None
-        models[identifier] = model
-print(json.dumps({'models': list(models.values())}, ensure_ascii=False))
+from model_catalog import ModelCatalog, binding_metadata
+from router_control import RouterControl
+
+
+def command_bindings(config, name):
+    manager = config['management']
+    command = manager['commands'][name]
+    if command.get('model_bindings'):
+        return [binding for binding in command['model_bindings'] if binding.get('visible', True)]
+    profile = command.get('profile')
+    if profile:
+        model = command.get('model') or manager.get('profile_models', {}).get(profile, {}).get('responses')
+        return [{'model': model or config['profiles'][profile]['standard']['model'], 'profile': profile}]
+    profiles = {route['profile'] for route in config['routes']
+                if any(header['name'].lower() == manager['command_header'].lower() and name in header.get('values', [])
+                       for header in route['match'].get('headers', []))}
+    return [{'model': manager.get('profile_models', {}).get(profile, {}).get('responses') or config['profiles'][profile]['standard']['model'],
+             'profile': profile} for profile in sorted(profiles)]
+
+
+def build(path, name, native):
+    config = json.loads(path.read_text())
+    manager = config['management']
+    catalog = ModelCatalog(config, path.parent)
+    native_models = native['models']
+    default = min(native_models, key=lambda row: row.get('priority', 0))
+    defaults = json.loads(os.environ.get('ROUTER_CODEX_DEFAULT_SERVICE_TIERS', '[]'))
+    if not isinstance(defaults, list) or any(not isinstance(row.get('id'), str) or not isinstance(row.get('name'), str) for row in defaults):
+        raise ValueError('默认服务等级须提供标识与显示名称')
+    labels = manager.get('labels', {})
+    pattern = os.environ.get('ROUTER_CODEX_CATALOG_MODEL_PATTERN', '')
+    upstream_ids = set()
+    models = {}
+    with RouterControl(path, config) as router:
+        for binding in command_bindings(config, name):
+            client_model = binding['model']
+            if client_model in models:
+                raise ValueError(f'客户端模型 ID 重复：{client_model}')
+            profile = config['profiles'][binding['profile']]
+            metadata = binding_metadata(config, binding, lambda backend: catalog.read(router, backend))
+            upstream_ids.update(metadata['upstream_ids'])
+            upstream = metadata['upstream']
+            native_ids = (upstream, upstream.rsplit('/', 1)[-1])
+            model = copy.deepcopy(next((row for row in native_models if row['slug'] in native_ids), default))
+            context = metadata['context_window']
+            if context is None:
+                raise ValueError(f'Router 目录与命令配置均缺少模型上下文：{client_model}')
+            modalities = metadata['capabilities'] & {'text', 'image'}
+            if not metadata['reasoning']:
+                model.update(supported_reasoning_levels=[], default_reasoning_level=None)
+            tiers = {row['id']: row for row in defaults}
+            standard, fast = profile['standard'], profile.get('fast')
+            if fast and standard.get('model') == fast.get('model') == upstream and standard['target'] == fast['target']:
+                tier = fast.get('field_policy', {}).get('set', {}).get('/service_tier')
+                if tier:
+                    tiers[tier] = {'id': tier, 'name': labels.get('service-tier:' + tier, tiers.get(tier, {}).get('name', tier)),
+                                   'description': labels.get('service-tier-description:' + tier, tiers.get(tier, {}).get('description', ''))}
+            model.update(slug=client_model, display_name=metadata['name'],
+                         description=binding.get('description') or '', context_window=context, max_context_window=context,
+                         visibility='list', supported_in_api=True, input_modalities=sorted(modalities or {'text'}, reverse=True),
+                         service_tiers=[tiers[key] for key in sorted(tiers)], additional_speed_tiers=[],
+                         upgrade=None, availability_nux=None)
+            models[client_model] = model
+    if not models:
+        raise ValueError('当前命令需要至少一个启用的模型绑定')
+    if pattern and not any(re.search(pattern, identifier) for identifier in upstream_ids):
+        raise ValueError('模型目录缺少启动方式指定的模型标识')
+    return {'models': list(models.values())}
+
+
+if __name__ == '__main__':
+    path, name, native = sys.argv[1:]
+    print(json.dumps(build(Path(path).resolve(), name, json.loads(Path(native).read_text())), ensure_ascii=False))

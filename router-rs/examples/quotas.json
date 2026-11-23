@@ -6,7 +6,12 @@
     "ttl_seconds": 60,
     "timeout_seconds": 30,
     "settings": {
-      "kind": "antigravity",
+      "bridge": {
+        "base_url": "http://127.0.0.1:43185",
+        "provider": "antigravity",
+        "token_file": "~/.config/router/credentials/antigravity-management-token"
+      },
+      "mapper": "scripts/quota_antigravity.py",
       "credential_file": "~/.config/router/credentials/antigravity/account.json",
       "url": "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
       "headers": {"User-Agent": "antigravity/hub/2.25.0 darwin/arm64"},
@@ -22,7 +27,7 @@
     "ttl_seconds": 60,
     "timeout_seconds": 30,
     "settings": {
-      "kind": "grok",
+      "mapper": "scripts/quota_grok.py",
       "url": "https://cli-chat-proxy.grok.com/v1/billing?format=credits",
       "headers": {"x-xai-token-auth": "xai-grok-cli", "x-grok-client-version": "1.0.46"},
       "period_labels": {"USAGE_PERIOD_TYPE_WEEKLY": "每周额度", "USAGE_PERIOD_TYPE_MONTHLY": "每月额度"},

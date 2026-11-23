@@ -41,7 +41,7 @@
 }
 ```
 
-模型下拉框只合并实时目录中已经返回、且同一名称前缀下存在至少两个档位的条目。选择模型后，将当前目录中的目标写入路由配置。相同规则适用于后续新模型，规则变化时修改 JSON；Rust 不包含服务商名称、模型名称或固定档位列表。已保存的映射可以在命令、客户端接入和共享模型编辑窗口中修改。
+模型下拉框按目录配置去掉思考档位后缀，每个模型系列显示一行。上游给同一系列的不同 ID 使用相同显示名时，优先选择基础系列的对应档位，其他 ID 在“思考强度对应模型”中查看和选择。命令模型绑定保存模型系列 ID，路由目标保存默认档位对应的上游 ID。已保存的映射可以在命令、客户端接入和共享模型编辑窗口中修改。
 
 ## 后台监控
 
@@ -109,6 +109,8 @@
 ```
 
 `path` 附加在该后端的 `base_url` 后。目录认证复用后端已配置的 API Key、OAuth 或凭据命令。`headers` 设置目录专用请求头；`auth_headers` 可重定义认证头模板，其中 `{token}` 来自该后端现有凭据。列表与属性映射均使用 JSON Pointer，`filter` 可按条目字段的字符串值筛选。
+
+`capability_pointers` 可读取多个能力数组。例如 OpenRouter 目录可同时读取 `/capabilities`、`/architecture/input_modalities` 与 `/supported_parameters`，让 Codex 从归一化记录读取输入模态和 `reasoning`、`reasoning_effort`。其他后端按各自的目录字段映射同一份记录。
 
 独立的目录服务通过 `request_url` 指定 HTTPS 地址，并通过 `credential_file`、`token_pointer` 读取对应访问令牌。配置 `request_body` 时使用 POST；`body_credentials` 将凭据 JSON 中指定指针的值填入请求字段。`rows_pointer` 可指向数组或以模型 ID 为键的对象，`required_pointers` 用于只选取包含指定属性的条目。`destination` 声明从目录新建模型时使用的默认请求策略，前端填入选中的 `target` 和 `model`。
 

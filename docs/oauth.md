@@ -2,6 +2,44 @@
 
 每个后端的 `auth.oauth` 定义服务商授权参数。它与 `token_file`、`token_env`、`token_command` 三种凭据来源互斥；`auth.headers` 继续通过 `{token}` 引用访问令牌。服务商参数由 JSON 提供，增加符合已有协议的服务商无需重新编译 Rust。
 
+## 账号管理
+
+配置 `auth.oauth` 后，服务自动出现在“服务与额度 → 账号与额度”。共用一个 `credential_file` 的后端归入同一账号组；例如 Grok 普通模式与 Fast 模式共用账号列表。此前的凭据文件对应账号 1，后续账号独立保存。配置 `auth_backend` 指向组内后端的配额来源后，每张账号卡片会直接显示该账号的额度。
+
+“添加账号”打开相应服务的授权页。设备码和取消操作显示在服务的卡片中。Router 按 OpenID Connect 用户标识识别已保存的账号，重新授权时更新该账号的凭据。标准 OAuth 服务可以配置 `userinfo_url`；请求包含 `openid` 时，默认读取令牌地址所在站点的 OpenID 配置。使用普通 OAuth 且缺少账号身份接口时，每次授权保存为单独的登录记录。
+
+Router 优先使用所选账号，收到上游 HTTP 429 或 401 时，在同一后端尝试其他已授权账号。账号 1 启用前的兼容登录接口仍按配置的原始凭据路径操作。
+
+### 本地桥接服务
+
+Antigravity 的账号适配程序 `scripts/bridge-accounts.py` 调用 CLIProxyAPI v8 的管理接口。桥接服务负责 Google 授权、凭据续期以及 `fill-first` 账号选择，Router 用同一组卡片展示账号及额度。
+
+`management.account_providers` 声明服务显示名称、关联后端、账号适配程序、设置及现有 `quota_source`。配置示例如下，路径使用当前安装位置。
+
+```json
+{
+  "antigravity": {
+    "label": "Antigravity",
+    "backends": ["antigravity"],
+    "adapter": {
+      "program": "/absolute/path/to/python",
+      "args": ["{{ config_directory }}/scripts/bridge-accounts.py"]
+    },
+    "settings": {
+      "base_url": "http://127.0.0.1:43185",
+      "provider": "antigravity",
+      "token_file": "/absolute/path/to/credentials/antigravity-management-token",
+      "state_file": "/absolute/path/to/provider-state/antigravity-accounts.json"
+    },
+    "quota_source": "antigravity"
+  }
+}
+```
+
+桥接服务的 `management.secret-key` 与 `token_file` 中的本机管理令牌对应，管理接口监听回环地址。该凭据及桥接配置存放在受保护目录。`state_file` 保存账号名称及授权进度，Google 令牌保存在桥接服务已有的 `oauth.auth-dir`。适配程序依赖 Requests。
+
+管理入口为 `POST /api/provider-accounts/action`，接受 `id` 和 `action`。`status` 读取账号和授权进度，`login` 启动浏览器授权，`cancel` 结束当前授权。`prefer` 和 `rename` 接受账号 `account`，其中 `rename` 还接受 `label`。额度卡片使用统一的配额查询接口。
+
 ## 设备码授权
 
 以下为 xAI 公共设备码客户端参数。授权端点来自 [xAI 的 OpenID 配置](https://auth.x.ai/.well-known/openid-configuration)，Client ID 是公开客户端标识。凭据路径应替换为自己的绝对路径。
@@ -97,7 +135,7 @@ Router 原子写入权限为 `0600` 的凭据文件，目录权限为 `0700`，�
 | 等价认证头 | `x-api-key: router-local-client` |
 | 目录请求 | `GET /v1/models`，兼容 `GET /models`；携带同一认证标记 |
 | 生成请求 | `POST /v1/messages` |
-| OAuth Gemini 模型 ID | `cc/gemini-3.8-flash-high` |
+| OAuth Gemini 模型 ID | `cc/gemini-3.8-flash` |
 
 本机共享标记对应 `runtime.clients` 中的共享目录入口。该目录反映当前 `catalog_commands` 的全部可见模型，应用按自身获准范围选择调用模型。目录响应成功表示共享入口认证成功；指定模型的调用结果通过该模型的请求确认。
 

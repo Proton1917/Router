@@ -1,3 +1,4 @@
+from importlib.util import module_from_spec, spec_from_file_location
 import json
 import math
 import sys
@@ -35,60 +36,63 @@ def percent(value, multiplier=1):
     return number
 
 
-def antigravity(settings):
-    credential = json.loads(Path(settings['credential_file']).expanduser().read_text())
-    if credential.get('disabled'):
-        raise ValueError('此账号已停用')
-    payload = fetch(settings, credential['access_token'], {'project': credential['project_id']})
-    groups = []
-    for group in payload['groups']:
-        windows = []
-        for bucket in group.get('buckets', []):
-            windows.append({'label': settings.get('window_labels', {}).get(bucket.get('window'), bucket.get('displayName', '配额')),
-                            'remaining_percent': percent(bucket.get('remainingFraction'), 100),
-                            'reset_at': bucket.get('resetTime'), 'disabled': bucket.get('disabled', False)})
-        groups.append({'label': settings.get('group_labels', {}).get(group['displayName'], group['displayName']), 'windows': windows})
-    if not groups:
-        raise ValueError('上游未返回配额分组')
-    return {'groups': groups, 'details': []}
+def load_mapper(settings, directory):
+    path = settings.get('mapper')
+    if path:
+        file = Path(directory) / Path(path).expanduser()
+    elif kind := settings.get('kind'):
+        file = Path(__file__).with_name(f'quota_{kind}.py')
+    else:
+        return None
+    spec = spec_from_file_location('quota_mapper', file)
+    mapper = module_from_spec(spec)
+    spec.loader.exec_module(mapper)
+    return mapper
 
 
-def grok(settings, token):
-    payload = fetch(settings, token)
-    config = payload.get('config')
-    if not isinstance(config, dict):
-        raise ValueError('上游未返回此账号的订阅配额')
-    period = config.get('currentPeriod', {})
-    used = config.get('creditUsagePercent')
-    # 该接口采用 protobuf JSON，存在计费周期时省略的数值字段为零。
-    if used is None and period.get('type'):
-        used = 0
-    remaining = None if used is None else max(0, 100 - float(used))
-    title = settings.get('period_labels', {}).get(period.get('type'), '当前周期')
-    result = {'groups': [{'label': '订阅共享额度' if config.get('isUnifiedBillingUser') else 'Grok Build 额度',
-                         'windows': [{'label': title, 'remaining_percent': percent(remaining),
-                                      'reset_at': period.get('end') or config.get('billingPeriodEnd')}]}], 'details': []}
-    for item in config.get('productUsage', []):
-        result['details'].append({'label': settings.get('product_labels', {}).get(item['product'], item['product']) + ' 已用',
-                                  'value': str(percent(item.get('usagePercent', 0))) + '%'})
-    for field, label in settings.get('balance_labels', {}).items():
-        if field in config:
-            result['details'].append({'label': label, 'value': f"${int(config[field].get('val', 0)) / 100:.2f} USD"})
-    return result
+def fetch_through_bridge(settings, directory, mapper):
+    from bridge_client import Bridge
+
+    credential = (Path(directory) / Path(settings['credential_file']).expanduser()).resolve()
+    with Bridge(settings['bridge']) as bridge:
+        account = next((row for row in bridge.accounts() if row.get('path') and Path(row['path']).resolve() == credential), None)
+        if account is None or account.get('disabled'):
+            raise ValueError('所选账号在桥接服务中不可用')
+        fields = settings.get('body_credentials', getattr(mapper, 'body_credentials', {}))
+        payload = settings.get('request_body')
+        if fields:
+            payload = {**(payload or {}), **{key: account[field] for key, field in fields.items()}}
+        headers = {'Authorization': 'Bearer $TOKEN$', 'Content-Type': 'application/json', **settings.get('headers', {})}
+        call = {'auth_index': account['auth_index'], 'method': 'POST' if payload is not None else 'GET',
+                'url': settings['url'], 'header': headers, 'data': json.dumps(payload) if payload is not None else ''}
+        result = bridge.call('POST', 'api-call', json=call, version=0)
+        if result['status_code'] == 401:
+            bridge.refresh(account)
+            result = bridge.call('POST', 'api-call', json=call, version=0)
+        if not 200 <= result['status_code'] < 300:
+            raise urllib.error.HTTPError(settings['url'], result['status_code'], '', None, None)
+        return json.loads(result['body'])
 
 
-def main():
-    request = json.load(sys.stdin)
-    settings = request['settings']
+def query(settings, token, directory):
     try:
-        if settings['kind'] == 'antigravity':
-            result = antigravity(settings)
-        elif settings['kind'] == 'grok':
-            result = grok(settings, request['token'])
+        mapper = load_mapper(settings, directory)
+        if settings.get('bridge'):
+            payload = fetch_through_bridge(settings, directory, mapper)
         else:
-            raise ValueError('未知配额适配类型')
+            body = settings.get('request_body')
+            if credential_file := settings.get('credential_file'):
+                credential = json.loads((Path(directory) / Path(credential_file).expanduser()).read_text())
+                if credential.get('disabled'):
+                    raise ValueError('此账号已停用')
+                token = credential[settings.get('token_field', 'access_token')]
+                fields = settings.get('body_credentials', getattr(mapper, 'body_credentials', {}))
+                if fields:
+                    body = {**(body or {}), **{key: credential[field] for key, field in fields.items()}}
+            payload = fetch(settings, token, body)
+        result = mapper.normalize(settings, payload, percent) if mapper else payload
     except urllib.error.HTTPError as error:
-        hint = {401: '授权已过期，请检查此服务的登录状态', 403: '此授权无权查询配额', 429: '配额查询受到限流，请稍后刷新'}.get(error.code, '上游配额服务暂时不可用')
+        hint = {401: '上游拒绝此账号的授权，请检查登录状态', 403: '此授权无权查询配额', 429: '配额查询受到限流，请稍后刷新'}.get(error.code, '上游配额服务暂时不可用')
         result = {'groups': [], 'error': f'{hint}（HTTP {error.code}）'}
     except (urllib.error.URLError, TimeoutError):
         result = {'groups': [], 'error': '配额服务连接失败，请检查网络或代理配置'}
@@ -98,8 +102,9 @@ def main():
         result = {'groups': [], 'error': '配额凭据文件读取失败'}
     except ValueError as error:
         result = {'groups': [], 'error': str(error)}
-    print(json.dumps(result, ensure_ascii=False, allow_nan=False))
+    return result
 
 
 if __name__ == '__main__':
-    main()
+    request = json.load(sys.stdin)
+    print(json.dumps(query(request['settings'], request.get('token'), request.get('config_directory', '.')), ensure_ascii=False, allow_nan=False))

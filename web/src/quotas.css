@@ -1,10 +1,15 @@
-.quota-overview { margin: 24px 0; }
+.quota-overview { margin: 24px 0; container-type: inline-size; }
 .quota-heading { display: flex; align-items: baseline; gap: 20px; flex-wrap: wrap; margin-bottom: 16px; }
 .quota-heading h2 { font-size: 20px; margin: 0; }
 .quota-heading p { color: var(--muted); font-size: 13px; margin: 0; }
-.quota-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.quota-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 20px; }
+.quota-service { display: grid; gap: 20px; min-width: 0; }
+@container (min-width: 930px) {
+  .quota-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
 .quota-card { border: 1px solid var(--line); border-radius: 20px; padding: 22px; background: rgba(255, 255, 255, .66); min-width: 0; }
-.quota-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.quota-card > header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.quota-card-controls { display: flex; flex-wrap: wrap; gap: 8px; }
 .quota-card h3 { margin: 0; font-size: 18px; }
 .quota-card header p { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; margin: 6px 0 0; }
 .quota-card header button { flex-shrink: 0; }

@@ -4,10 +4,9 @@ set -euo pipefail
 routing_config="${1:?缺少 router 配置路径}"
 catalog_directory="${2:?缺少模型目录保存位置}"
 client_program="${3:?缺少 Codex 程序}"
+router_program="${4:?缺少 Router 程序}"
 command_name="${ROUTER_COMMAND_NAME:?缺少启动命令标识，请通过 router run 启动}"
-cache_seconds="${ROUTER_CODEX_CATALOG_CACHE_SECONDS:-300}"
-[[ "$cache_seconds" =~ '^(0|[1-9][0-9]*)$' ]] || { echo "模型目录缓存秒数必须为非负整数" >&2; exit 1; }
-shift 3
+shift 4
 
 typeset -a provider_args=()
 while (( $# )) && [[ "$1" != "--" ]]; do
@@ -21,66 +20,16 @@ mkdir -p "$catalog_directory"
 chmod 700 "$catalog_directory"
 client_umask="$(umask)"
 umask 077
-catalog_source="$(mktemp "$catalog_directory/source.XXXXXXXX")"
-catalog_file=""
 catalog_native=""
-trap 'rm -f -- "$catalog_source" "$catalog_file" "$catalog_native"' EXIT
+catalog_file="$(mktemp "$catalog_directory/catalog.XXXXXXXX")"
+trap 'rm -f -- "$catalog_file" "$catalog_native"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
-catalog_file="$(mktemp "$catalog_directory/catalog.XXXXXXXX")"
-
-client_version="$(umask "$client_umask"; "$client_program" --version)"
-cache_id="$(printf '%s\0' "${routing_config:A}" "$command_name" | shasum -a 512)"
-cache_id="${cache_id%% *}"
-catalog_cache="$catalog_directory/cache.$cache_id.json"
-fingerprint="$(
-  { printf '%s\0' "$client_program" "$client_version" "${provider_args[@]}" \
-      "${ROUTER_CODEX_DEFAULT_SERVICE_TIERS:-[]}" "${ROUTER_CODEX_CATALOG_MODEL_PATTERN:-}";
-    printf '%s\0' "${ROUTER_CODEX_CATALOG_PATH:-/v1/models}" "${ROUTER_CODEX_CATALOG_PYTHON:-python3}";
-    cat -- "$routing_config" "${0:A}" "${0:A:h}/codex-catalog.jq" "${0:A:h}/codex-model-source.py"; } | shasum -a 512
-)"
-fingerprint="${fingerprint%% *}"
-zmodload zsh/system
-: >> "$catalog_directory/cache.$cache_id.lock"
-zsystem flock -t 30 -f cache_lock "$catalog_directory/cache.$cache_id.lock" || {
-  echo "等待模型目录更新锁超时" >&2
-  exit 1
-}
-cache_valid=false
-if [[ -f "$catalog_cache" ]] && (( cache_seconds > 0 )); then
-  cache_valid="$(jq -er --arg fingerprint "$fingerprint" --argjson now "$(date +%s)" \
-    --argjson ttl "$cache_seconds" '
-      if (.fingerprint | type) != "string" or (.created_at | type) != "number"
-         or (.catalog.models | type) != "array" or (.catalog.models | length) == 0
-      then error("已保存的模型目录损坏，请移除该缓存文件后重新启动")
-      else (.fingerprint == $fingerprint and .created_at <= $now and $now - .created_at < $ttl) | tostring end
-    ' "$catalog_cache")"
-fi
-
-if [[ "$cache_valid" == true ]]; then
-  jq -e '.catalog' "$catalog_cache" > "$catalog_file"
-else
-  catalog_native="$(mktemp "$catalog_directory/native.XXXXXXXX")"
-  (umask "$client_umask"; "$client_program" --no-daemon debug models --bundled) > "$catalog_native"
-  "${ROUTER_CODEX_CATALOG_PYTHON:-python3}" "${0:A:h}/codex-model-source.py" "$routing_config" "$command_name" "$catalog_native" > "$catalog_source"
-  # 校验命令绑定与真实目录元数据后，原子保存精简目录。
-  if ! jq --slurpfile routing "$routing_config" --arg command "$command_name" \
-    --argjson defaults "${ROUTER_CODEX_DEFAULT_SERVICE_TIERS:-[]}" \
-    --arg pattern "${ROUTER_CODEX_CATALOG_MODEL_PATTERN:-}" \
-    -f "${0:A:h}/codex-catalog.jq" "$catalog_source" > "$catalog_file"; then
-    echo "router: $command_name 的模型目录校验失败，启动已停止；请检查后端目录连接与模型绑定。" >&2
-    exit 1
-  fi
-  if (( cache_seconds > 0 )); then
-    jq -c --arg fingerprint "$fingerprint" --argjson created_at "$(date +%s)" \
-      '{fingerprint:$fingerprint, created_at:$created_at, catalog:.}' "$catalog_file" > "$catalog_source"
-    mv -- "$catalog_source" "$catalog_cache"
-  fi
-fi
-zsystem flock -u "$cache_lock"
-[[ ! -f "$catalog_source" ]] || rm -- "$catalog_source"
+catalog_native="$(mktemp "$catalog_directory/native.XXXXXXXX")"
+(umask "$client_umask"; "$client_program" --no-daemon debug models --bundled) > "$catalog_native"
+"${ROUTER_CODEX_CATALOG_PYTHON:-python3}" "${0:A:h}/codex-model-source.py" "$routing_config" "$command_name" "$catalog_native" > "$catalog_file"
 
 catalog_option="$(jq -nr --arg path "$catalog_file" '"model_catalog_json=" + ($path | tojson)')"
 umask "$client_umask"
-"$client_program" "${provider_args[@]}" -c "$catalog_option" "$@"
+"$router_program" __client-exec "$client_program" "${provider_args[@]}" -c "$catalog_option" "$@"

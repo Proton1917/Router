@@ -10,6 +10,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from model_catalog import ModelCatalog, destination_models
+from router_control import RouterControl
+
 
 def at(value, keys):
     for key in keys:
@@ -36,7 +39,7 @@ class Discovery:
         self.refresh = refresh
         self.client_headers = {name.lower():value for name,value in (client_headers or {}).items()}
         self.responses = {}
-        self.catalogs = {}
+        self.catalog = ModelCatalog(config, directory)
         self.headers = {}
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
         self.cache = Path(self.settings['cache_directory'])
@@ -52,13 +55,10 @@ class Discovery:
         return source.get('base_url', backend['base_url']).rstrip('/') + path
 
     def catalog_window(self, target, model):
-        if target not in self.catalogs:
-            path = self.directory / 'model-catalogs' / (target + '.json')
-            self.catalogs[target] = json.loads(path.read_text()) if path.is_file() else {}
-        snapshot = self.catalogs[target]
-        if snapshot.get('base_url') == self.config['runtime']['backends'][target]['base_url'] and time.time() - (snapshot.get('updated_at') or 0) <= self.settings['ttl_seconds']:
-            return next((row.get('context_window') for row in snapshot.get('models', []) if row.get('id') == model), None)
-        return None
+        if self.refresh and target not in self.catalog.models:
+            with RouterControl(self.directory / 'router.json', self.config) as control:
+                self.catalog.read(control, target, refresh=True)
+        return self.catalog.load(target, self.settings['ttl_seconds']).get(model, {}).get('context_window')
 
     def get(self, target, path):
         backend = self.config['runtime']['backends'][target]
@@ -94,19 +94,19 @@ class Discovery:
         target = destination['target']
         model = destination.get('model', '')
         provider = destination.get('provider', '')
-        source = self.settings.get('sources', {}).get(target)
+        source = self.settings.get('sources', {}).get(target, {})
         base = {'target': target, 'model': model, 'provider': provider, 'max_tokens': None}
-        if not source or not model:
-            return {**base, 'message': '此后端尚未提供上下文目录配置'}
+        if not model:
+            return {**base, 'message': '模型配置需要明确的 API 模型标识'}
         if any(model.startswith(prefix) for prefix in source.get('unsupported_prefixes', [])):
             return {**base, 'message': '此入口的目录没有公布预设的上下文上限'}
         identity = {'base_url': self.catalog_url(target, ''), 'target': target, 'model': model, 'provider': provider, 'source': source}
         key = hashlib.blake2b(json.dumps(identity, sort_keys=True).encode(), digest_size=16).hexdigest()
         cache = self.cache / (key + '.json')
         catalog_window = self.catalog_window(target, model)
-        if cache.exists() and not self.refresh:
+        if cache.exists() and not self.refresh and (source.get('presets') or source.get('endpoints')):
             saved = json.loads(cache.read_text())
-            if 0 <= time.time() - saved['checked_at'] <= self.settings['ttl_seconds'] and (saved['result']['max_tokens'] is not None or catalog_window is None):
+            if 0 <= time.time() - saved['checked_at'] <= self.settings['ttl_seconds'] and saved.get('catalog_window') == catalog_window:
                 return saved['result']
         preset = source.get('presets')
         if preset and model.startswith(preset['prefix']):
@@ -127,28 +127,12 @@ class Discovery:
             result = {**base, 'max_tokens': min(limits) if len(limits) == len(resolved) else None, 'resolved_models': models, 'source': self.catalog_url(target, path), 'checked_at': int(time.time())}
             if result['max_tokens'] is None:
                 result['message'] = '预设中的模型目录没有公布完整上下文上限'
-            self.save(cache, result)
+            self.save(cache, result, catalog_window)
             return result
-        data = self.get(target, source['path'])
-        rows = at(data, source['rows'])
-        if not isinstance(rows, list):
-            raise ValueError('模型目录没有返回配置的模型数组：' + target)
-        matches = [row for row in rows if row.get(source['id']) == model]
-        if not matches:
-            result = {**base, 'message': '后端模型目录未收录此 API 标识', 'checked_at':int(time.time()), 'source':self.catalog_url(target, source['path'])}
-            self.save(cache, result)
-            return result
-        if len(matches) > 1:
-            raise ValueError('模型目录的配置模型标识重复：' + model)
-        window = at(matches[0], source['context'])
-        if window is None:
-            window = catalog_window
-        if window is not None and not positive(window):
-            raise ValueError('模型目录的上下文上限必须为正整数：' + model)
-        limits = [window] if positive(window) else []
-        result = {**base, 'source': self.catalog_url(target, source['path'])}
+        limits = [catalog_window] if positive(catalog_window) else []
+        result = dict(base)
         endpoints = source.get('endpoints')
-        if endpoints and limits:
+        if endpoints and (provider or limits):
             path = endpoints['path'].format(model=urllib.parse.quote(model, safe='/'))
             rows = at(self.get(target, path), endpoints['rows'])
             if not isinstance(rows, list) or not rows:
@@ -173,12 +157,13 @@ class Discovery:
         if not limits:
             result['message'] = '后端模型目录没有公布上下文上限'
         result['checked_at'] = int(time.time())
-        self.save(cache, result)
+        if endpoints and limits:
+            self.save(cache, result, catalog_window)
         return result
 
-    def save(self, cache, result):
+    def save(self, cache, result, catalog_window):
         with tempfile.NamedTemporaryFile(mode='w', dir=self.cache, delete=False) as output:
-            json.dump({'checked_at': result['checked_at'], 'result': result}, output)
+            json.dump({'checked_at': result['checked_at'], 'catalog_window': catalog_window, 'result': result}, output)
             temporary = output.name
         os.replace(temporary, cache)
 
@@ -202,7 +187,7 @@ class Discovery:
                     destination = {**profile[speed], 'provider':provider} if provider else profile[speed]
                     reasoning = destination.get('reasoning_models')
                     if reasoning:
-                        models = list(dict.fromkeys(reasoning['models'].values())) if reasoning['follow_request'] else [reasoning['models'][reasoning['default_effort']]]
+                        models = destination_models(destination, binding['model'])
                         variants = [self.destination({**destination, 'model':model}) for model in models]
                         limits = [variant['max_tokens'] for variant in variants if variant['max_tokens'] is not None]
                         row = {**variants[0], 'max_tokens':min(limits) if len(limits) == len(variants) else None, 'resolved_models':models}

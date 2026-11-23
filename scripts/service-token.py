@@ -9,6 +9,7 @@ import time
 from urllib.parse import urlsplit
 
 import requests
+from bridge_client import Bridge
 
 
 def main():
@@ -59,6 +60,9 @@ def main():
                 if time.monotonic() >= deadline:
                     raise RuntimeError("本机适配服务启动超时")
                 time.sleep(interval)
+        if settings := config.get("bridge"):
+            with Bridge(settings) as bridge:
+                bridge.ensure_available()
         print(token)
 
 

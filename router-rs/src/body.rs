@@ -692,6 +692,25 @@ impl JsonBody {
         Ok(reqwest::Body::wrap_stream(stream))
     }
 
+    pub fn replay_body(&self) -> reqwest::Body {
+        let reader = FileCursor {
+            file: self.file.clone(),
+            offset: 0,
+        };
+        let capacity = self.settings.io_buffer_bytes;
+        let stream = futures_util::stream::try_unfold(reader, move |mut reader| async move {
+            tokio::task::spawn_blocking(move || {
+                let mut chunk = vec![0; capacity];
+                let count = reader.read(&mut chunk)?;
+                chunk.truncate(count);
+                Ok::<_, std::io::Error>((count > 0).then_some((chunk, reader)))
+            })
+            .await
+            .map_err(std::io::Error::other)?
+        });
+        reqwest::Body::wrap_stream(stream)
+    }
+
     #[cfg(test)]
     pub fn bytes_for_verification(&self) -> Result<Vec<u8>> {
         let mut bytes = Vec::new();

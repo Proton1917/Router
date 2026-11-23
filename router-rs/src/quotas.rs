@@ -65,6 +65,7 @@ struct Quota {
 
 struct Snapshot {
     source: Source,
+    provider: Option<crate::provider_accounts::Source>,
     attempted: Instant,
     updated_at: Option<u64>,
     data: Option<Quota>,
@@ -73,17 +74,26 @@ struct Snapshot {
 
 #[derive(Default)]
 pub(crate) struct Service {
-    entries: Mutex<BTreeMap<String, Arc<Mutex<Option<Snapshot>>>>>,
+    entries: Mutex<BTreeMap<QuotaKey, Arc<Mutex<Option<Snapshot>>>>>,
 }
+
+type QuotaKey = (String, Option<String>);
 
 #[derive(Deserialize)]
 struct ReadRequest {
     id: String,
+    account: Option<String>,
     #[serde(default)]
     refresh: bool,
 }
 
-async fn query(state: &ControlState, source: &Source) -> Result<Quota> {
+async fn query(
+    state: &ControlState,
+    config: &crate::routing::RouterConfig,
+    source: &Source,
+    provider: Option<&crate::provider_accounts::Source>,
+    account: Option<&str>,
+) -> Result<Quota> {
     ensure!(
         (1..=120).contains(&source.timeout_seconds),
         "配额查询超时须为 1–120 秒"
@@ -92,8 +102,29 @@ async fn query(state: &ControlState, source: &Source) -> Result<Quota> {
         (15..=3600).contains(&source.ttl_seconds),
         "配额刷新间隔须为 15–3600 秒"
     );
-    let token = if let Some(id) = &source.auth_backend {
-        let config = crate::load_router_runtime_config(&state.path)?;
+    let mut settings = source.settings.clone();
+    let token = if let Some((provider, account)) = provider.zip(account) {
+        if let Some(native) = &provider.native {
+            let oauth = crate::oauth_accounts::Pool::new(config, native)?.selected(account)?;
+            Some(
+                tokio::time::timeout(
+                    Duration::from_secs(source.timeout_seconds),
+                    crate::oauth::access_token(&oauth),
+                )
+                .await
+                .context("配额授权读取超时")??,
+            )
+        } else {
+            let result = crate::provider_accounts::call_adapter(
+                state,
+                provider,
+                json!({"action":"quota_credential","account":account}),
+            )
+            .await?;
+            settings["credential_file"] = result["credential_file"].clone();
+            None
+        }
+    } else if let Some(id) = &source.auth_backend {
         let auth = config
             .runtime
             .backends
@@ -131,7 +162,8 @@ async fn query(state: &ControlState, source: &Source) -> Result<Quota> {
             .spawn()
             .context("配额适配程序启动失败")?;
     let operation = async {
-        let input = json!({"settings":source.settings,"token":token,"config_directory":state.path.parent()});
+        let input =
+            json!({"settings":settings,"token":token,"config_directory":state.path.parent()});
         let mut stdin = child.stdin.take().context("配额输入不可用")?;
         stdin.write_all(&serde_json::to_vec(&input)?).await?;
         drop(stdin);
@@ -170,26 +202,52 @@ async fn read(
     Json(request): Json<ReadRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let requested = Instant::now();
-    let value = control::load_value(&state.path)?;
-    let sources = control::management(&value)?.quota_sources;
+    let config = crate::load_router_runtime_config(&state.path)?;
+    let manager = config.management.as_ref().context("管理界面缺少配置")?;
+    let sources = &manager.quota_sources;
     let source = sources.get(&request.id).context("此配额来源尚未配置")?;
+    let providers = crate::provider_accounts::sources(&config);
+    let provider = if request.account.is_some() {
+        Some(
+            providers
+                .values()
+                .find(|provider| provider.quota_source.as_ref() == Some(&request.id))
+                .context("此配额来源按服务查询")?,
+        )
+    } else {
+        None
+    };
     let entry = {
         let mut entries = state.quotas.entries.lock().await;
-        entries.retain(|id, _| sources.contains_key(id));
-        entries.entry(request.id.clone()).or_default().clone()
+        entries.retain(|(id, _), _| sources.contains_key(id));
+        entries
+            .entry((request.id.clone(), request.account.clone()))
+            .or_default()
+            .clone()
     };
     let mut cached = entry.lock().await;
     let reuse = cached.as_ref().is_some_and(|snapshot| {
         snapshot.source == *source
+            && snapshot.provider.as_ref() == provider
             && (snapshot.attempted >= requested
                 || (!request.refresh
                     && snapshot.attempted.elapsed() < Duration::from_secs(source.ttl_seconds)))
     });
     if !reuse {
-        let result = query(&state, source).await;
-        let previous = cached.take().filter(|snapshot| snapshot.source == *source);
+        let result = query(
+            &state,
+            &config,
+            source,
+            provider,
+            request.account.as_deref(),
+        )
+        .await;
+        let previous = cached.take().filter(|snapshot| {
+            snapshot.source == *source && snapshot.provider.as_ref() == provider
+        });
         let mut snapshot = Snapshot {
             source: source.clone(),
+            provider: provider.cloned(),
             attempted: Instant::now(),
             data: previous.as_ref().and_then(|s| s.data.clone()),
             updated_at: previous.and_then(|s| s.updated_at),

@@ -61,7 +61,7 @@ else:
     service_arguments = ['-c', 'service_tier=' + json.dumps(service_tiers[options.router_service_tier])]
     program = '/bin/zsh'
     launch_arguments = [str(Path(__file__).with_name('codex-api.zsh')), str(config_path),
-                        catalog_directory, client_program, *provider_arguments, '--',
+                        catalog_directory, client_program, environment['ROUTER_EXECUTABLE'], *provider_arguments, '--',
                         *service_arguments, *client_arguments]
     if environment.get('ROUTER_CODEX_USE_CATALOG') == '0':
         program = client_program
@@ -76,6 +76,7 @@ elif options.router_mode == 'api':
     # 复用 Router 的最终启动阶段，确保 API 网关运行并应用命令环境。
     os.execvpe(executable, [executable, '--config', str(config_path), '__exec', program, *launch_arguments], environment)
 else:
+    executable = environment['ROUTER_EXECUTABLE']
     for key in ('ROUTER_EXECUTABLE', 'ROUTER_CONFIG', 'ROUTER_COMMAND_NAME', 'ROUTER_LAUNCH_PREVIEW'):
         environment.pop(key, None)
-    os.execvpe(program, [program, *launch_arguments], environment)
+    os.execvpe(executable, [executable, '__client-exec', program, *launch_arguments], environment)
